@@ -3,16 +3,21 @@ namespace Zeiterfassung;
 static class Program
 {
     [STAThread]
-    static void Main()
+    static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+
+        // Updater-Modus: von UpdateService.LaunchApplier gestartet, ersetzt die Programmdateien
+        if (args.Length >= 4 && args[0] == "--apply-update")
+            return UpdateService.Apply(args[1], args[2], int.TryParse(args[3], out var pid) ? pid : 0);
 
         using var mutex = new Mutex(true, "Zeiterfassung.Client.SingleInstance", out bool first);
         if (!first)
         {
             MessageBox.Show("Zeiterfassung läuft bereits (siehe Infobereich der Taskleiste).", "Zeiterfassung");
-            return;
+            return 0;
         }
+        UpdateService.CleanupOldUpdater();
 
         var settings = AppSettings.Load();
         using var api = new ApiClient(settings);
@@ -23,7 +28,7 @@ static class Program
             if (!settings.Activated || settings.ServerUrl == "" || settings.ApiKey == "")
             {
                 using var setup = new SetupForm(settings, api);
-                if (setup.ShowDialog() != DialogResult.OK) return;
+                if (setup.ShowDialog() != DialogResult.OK) return 0;
             }
 
             // 2. Lizenz beim Start prüfen (offline = Login-Versuch zeigt Fehler)
@@ -52,14 +57,14 @@ static class Program
                 using var login = new LoginForm(settings, api);
                 var res = login.ShowDialog();
                 if (res == DialogResult.Retry) { settings.Activated = false; settings.Save(); continue; }
-                if (res != DialogResult.OK) return;
+                if (res != DialogResult.OK) return 0;
             }
 
             // 4. Hauptfenster
             using var main = new MainForm(settings, api);
             Application.Run(main);
             if (main.RestartRequested) continue;
-            return;
+            return 0;
         }
     }
 }

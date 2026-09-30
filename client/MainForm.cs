@@ -23,14 +23,16 @@ public sealed class MainForm : Form
     StatusDto? _status;
     readonly Stopwatch _sinceSync = new();
     int _syncCounter;
-    bool _busy, _reallyExit;
+    bool _busy, _reallyExit, _updating;
+    int _updateCounter;
+    string? _declinedVersion;
 
     public bool RestartRequested { get; private set; }
 
     public MainForm(AppSettings s, ApiClient api)
     {
         _s = s; _api = api;
-        Text = "Zeiterfassung";
+        Text = "Zeiterfassung " + UpdateService.Current;
         ClientSize = new Size(560, 620);
         MinimumSize = new Size(520, 560);
         StartPosition = FormStartPosition.CenterScreen;
@@ -79,6 +81,9 @@ public sealed class MainForm : Form
         var menu = new MenuStrip();
         var acc = new ToolStripMenuItem("Konto");
         acc.DropDownItems.Add("Aktualisieren", null, async (_, _) => await RefreshAllAsync());
+        acc.DropDownItems.Add("Nach Updates suchen…", null, async (_, _) => await CheckForUpdatesAsync(true));
+        acc.DropDownItems.Add("Einstellungen…", null, (_, _) => { using var f = new SettingsForm(_s); f.ShowDialog(this); });
+        acc.DropDownItems.Add(new ToolStripSeparator());
         acc.DropDownItems.Add("Abmelden", null, async (_, _) => await LogoutAsync(false));
         acc.DropDownItems.Add("Lizenz ändern…", null, async (_, _) => await LogoutAsync(true));
         acc.DropDownItems.Add(new ToolStripSeparator());
@@ -106,7 +111,7 @@ public sealed class MainForm : Form
         Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) Hide(); };
         FormClosing += OnClosing;
         _tick.Tick += async (_, _) => await OnTickAsync();
-        Shown += async (_, _) => { await RefreshAllAsync(); _tick.Start(); };
+        Shown += async (_, _) => { await RefreshAllAsync(); _tick.Start(); await CheckForUpdatesAsync(false); };
     }
 
     void ShowFromTray() { Show(); WindowState = FormWindowState.Normal; Activate(); }
@@ -143,6 +148,7 @@ public sealed class MainForm : Form
     {
         Render();
         if (++_syncCounter >= 30) { _syncCounter = 0; await RefreshStatusAsync(); }
+        if (++_updateCounter >= 6 * 3600) { _updateCounter = 0; await CheckForUpdatesAsync(false); }
     }
 
     async Task RefreshAllAsync()
@@ -224,6 +230,73 @@ public sealed class MainForm : Form
         return true;
     }
 
+    /// <summary>Prüft auf Updates. manual = vom Benutzer ausgelöst (fragt immer nach, meldet auch „aktuell“).</summary>
+    async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_updating) return;
+        UpdateInfo info;
+        try { info = await _api.CheckUpdateAsync(UpdateService.Current); }
+        catch (ApiException ex)
+        {
+            if (HandleAuth(ex)) return;
+            if (manual) MessageBox.Show(ex.Message, "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!info.UpdateAvailable || info.Version is null)
+        {
+            if (manual) MessageBox.Show($"Du hast die aktuelle Version ({UpdateService.Current}).", "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var mode = manual ? (info.Mandatory ? UpdateMode.Auto : UpdateMode.Notify) : UpdateService.EffectiveMode(_s, info);
+        if (mode == UpdateMode.Off) return;
+        if (!manual && mode == UpdateMode.Notify && _declinedVersion == info.Version) return;
+
+        if (!UpdateService.CanWriteAppDir())
+        {
+            if (manual || info.Mandatory)
+                MessageBox.Show($"Version {info.Version} ist verfügbar, aber der Programmordner ist nicht beschreibbar.\n" +
+                    "Bitte das Programm in einen Benutzerordner (z. B. %LocalAppData%) verschieben oder als Administrator ausführen.",
+                    "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (mode == UpdateMode.Notify)
+        {
+            var notes = string.IsNullOrWhiteSpace(info.Notes) ? "" : "\n\n" + info.Notes;
+            var r = MessageBox.Show($"Version {info.Version} ist verfügbar (installiert: {UpdateService.Current}).{notes}\n\nJetzt installieren?",
+                "Update verfügbar", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (r != DialogResult.Yes) { _declinedVersion = info.Version; return; }
+        }
+        else
+        {
+            _tray.ShowBalloonTip(3000, "Zeiterfassung", (info.Mandatory ? "Pflicht-Update" : "Update") + $" auf {info.Version} wird installiert …", ToolTipIcon.Info);
+        }
+        await InstallUpdateAsync(info);
+    }
+
+    async Task InstallUpdateAsync(UpdateInfo info)
+    {
+        _updating = true;
+        SetButtons(false, false, false);
+        _state.Text = "Update wird geladen …";
+        try
+        {
+            var dir = await UpdateService.DownloadAndStageAsync(_api, info, new Progress<int>(p => _state.Text = $"Update wird geladen … {p} %"));
+            _state.Text = "Update wird installiert – Zeiterfassung startet neu …";
+            UpdateService.LaunchApplier(dir);
+            _reallyExit = true; // Die Zeiterfassung läuft serverseitig weiter, ein Neustart unterbricht sie nicht
+            Close();
+        }
+        catch (Exception ex)
+        {
+            _updating = false;
+            MessageBox.Show("Update fehlgeschlagen: " + ex.Message, "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            Render();
+        }
+    }
+
     void ApplyStatus(StatusDto st)
     {
         _status = st;
@@ -241,7 +314,7 @@ public sealed class MainForm : Form
 
     void Render()
     {
-        if (_status is not { } st) return;
+        if (_updating || _status is not { } st) return;
         long add = _sinceSync.IsRunning ? _sinceSync.ElapsedMilliseconds / 1000 : 0;
         bool running = st.ClockedIn && !st.OnBreak;
         long cur = st.CurrentSeconds + (running ? add : 0);

@@ -14,6 +14,9 @@ public sealed class AppSettings
     public string LastUsername { get; set; } = "";
     public bool Activated { get; set; }
 
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+    public UpdateMode UpdateMode { get; set; } = UpdateMode.Server;
+
     static readonly string PathFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Zeiterfassung", "settings.json");
 

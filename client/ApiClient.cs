@@ -15,6 +15,7 @@ public sealed record StatusDto(bool ClockedIn, bool OnBreak, CurrentEntryDto? En
     long CurrentSeconds, long TodaySeconds, long WeekSeconds, long WeekTargetSeconds, string ServerTime);
 public sealed record EntryDto(int Id, string Start, string? End, string? ProjectName, string Note, long BreakSeconds, long WorkedSeconds);
 public sealed record LicenseInfo(string Customer, string? ExpiresAt);
+public sealed record UpdateInfo(string Policy, bool UpdateAvailable, string? Version, string? Notes, bool Mandatory, long Size, string? Sha256);
 
 public sealed class ApiException : Exception
 {
@@ -115,6 +116,42 @@ public sealed class ApiClient : IDisposable
 
     public async Task<List<EntryDto>> GetEntriesAsync(DateTime from, DateTime to) =>
         Get<List<EntryDto>>(await SendAsync(HttpMethod.Get, "entries", null, $"from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}"), "entries");
+
+
+    public async Task<UpdateInfo> CheckUpdateAsync(Version current) =>
+        (await SendAsync(HttpMethod.Get, "update/check", null, $"version={current}")).Deserialize<UpdateInfo>(Json)!;
+
+    public async Task DownloadUpdateAsync(string version, string destFile, IProgress<int>? progress = null)
+    {
+        var url = $"{_s.ServerUrl.TrimEnd('/')}/api/index.php?route=update/download&version={Uri.EscapeDataString(version)}";
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Add("X-Api-Key", _s.ApiKey);
+        req.Headers.Add("X-Machine-Id", _machineId);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        try
+        {
+            // ResponseHeadersRead: der 15-s-Timeout gilt dann nur bis die Header da sind, nicht für den ganzen Download
+            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+                throw new ApiException((int)resp.StatusCode, "download", $"Download fehlgeschlagen (HTTP {(int)resp.StatusCode}).");
+            var total = resp.Content.Headers.ContentLength ?? -1;
+            await using var src = await resp.Content.ReadAsStreamAsync(cts.Token);
+            await using var dst = File.Create(destFile);
+            var buf = new byte[81920];
+            long read = 0;
+            int n;
+            while ((n = await src.ReadAsync(buf, cts.Token)) > 0)
+            {
+                await dst.WriteAsync(buf.AsMemory(0, n), cts.Token);
+                read += n;
+                if (total > 0) progress?.Report((int)(read * 100 / total));
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            throw new ApiException(0, "network", "Server nicht erreichbar oder Download abgebrochen.");
+        }
+    }
 
     public void Dispose() => _http.Dispose();
 }

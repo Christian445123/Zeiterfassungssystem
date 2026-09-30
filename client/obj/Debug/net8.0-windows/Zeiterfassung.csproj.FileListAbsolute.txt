@@ -12,3 +12,4 @@ C:\Users\Chris\Dropbox\Projekte\Firma\Zeiterfassungssystem\client\obj\Debug\net8
 C:\Users\Chris\Dropbox\Projekte\Firma\Zeiterfassungssystem\client\obj\Debug\net8.0-windows\Zeiterfassung.pdb
 C:\Users\Chris\Dropbox\Projekte\Firma\Zeiterfassungssystem\client\obj\Debug\net8.0-windows\Zeiterfassung.genruntimeconfig.cache
 C:\Users\Chris\Dropbox\Projekte\Firma\Zeiterfassungssystem\client\obj\Debug\net8.0-windows\ref\Zeiterfassung.dll
+C:\Users\Chris\Dropbox\Projekte\Firma\Zeiterfassungssystem\client\obj\Debug\net8.0-windows\Zeiterfassung.sourcelink.json

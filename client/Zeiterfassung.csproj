@@ -8,6 +8,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>Zeiterfassung</AssemblyName>
     <RootNamespace>Zeiterfassung</RootNamespace>
+    <Version>1.0.0</Version>
     <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
   </PropertyGroup>
 
