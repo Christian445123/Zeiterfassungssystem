@@ -84,6 +84,44 @@ try {
     }
     q('UPDATE license_devices SET last_seen = NOW() WHERE id = ?', [$device['id']]);
 
+    // ---- Client-Updates (Gerät muss aktiviert sein, Benutzer-Login nicht nötig) ----
+    if ($route === 'update/check' && $method === 'GET') {
+        ensure_migrated();
+        $cur = (string)($_GET['version'] ?? '');
+        if (!valid_version($cur)) {
+            api_fail(400, 'Ungültige Versionsangabe.', 'bad_version');
+        }
+        $policy = setting_get('client_update_policy', 'notify');
+        $newer = array_values(array_filter(client_releases_active(), fn($r) => version_compare($r['version'], $cur, '>')));
+        if (!$newer) {
+            api_ok(['policy' => $policy, 'update_available' => false]);
+        }
+        $latest = $newer[0];
+        api_ok([
+            'policy' => $policy,
+            'update_available' => true,
+            'version' => $latest['version'],
+            'notes' => $latest['notes'],
+            'mandatory' => (bool)array_filter($newer, fn($r) => (int)$r['mandatory'] === 1),
+            'size' => (int)$latest['size_bytes'],
+            'sha256' => $latest['sha256'],
+        ]);
+    }
+
+    if ($route === 'update/download' && $method === 'GET') {
+        $ver = (string)($_GET['version'] ?? '');
+        $rel = valid_version($ver) ? q_one('SELECT * FROM client_releases WHERE version = ? AND active = 1', [$ver]) : null;
+        $file = $rel ? client_release_path($ver) : '';
+        if (!$rel || !is_file($file)) {
+            api_fail(404, 'Release nicht gefunden.', 'not_found');
+        }
+        header('Content-Type: application/zip');
+        header('Content-Length: ' . filesize($file));
+        header('Content-Disposition: attachment; filename="zeiterfassung-' . $ver . '.zip"');
+        readfile($file);
+        exit;
+    }
+
     if ($route === 'license/status' && $method === 'GET') {
         api_ok(['customer' => $lic['customer'], 'expires_at' => $lic['expires_at']]);
     }

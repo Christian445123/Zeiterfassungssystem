@@ -127,3 +127,6 @@ function license_is_valid(array $lic): bool
 }
 
 require __DIR__ . '/time.php';
+require __DIR__ . '/migrate.php';
+require __DIR__ . '/settings.php';
+require __DIR__ . '/updater.php';

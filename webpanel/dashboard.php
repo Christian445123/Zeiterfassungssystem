@@ -32,7 +32,24 @@ if (is_post()) {
 }
 
 $st = user_status($uid);
+$updateNotice = null;
+if ($me['role'] === 'admin') {
+    try {
+        ensure_migrated();
+        $tick = panel_auto_tick(); // prüft max. 1x/Tag, installiert im Modus „automatisch“
+        if ($tick && $tick['type'] !== 'info') {
+            flash($tick['msg'], $tick['type']);
+        }
+        $latest = panel_latest_known();
+        $updateNotice = $latest && $latest['available'] ? $latest['version'] : null;
+    } catch (Throwable $ex) {
+        error_log('Update-Check: ' . $ex->getMessage());
+    }
+}
 page_header('Dashboard', 'dash');
+if ($updateNotice): ?>
+    <div class="flash ok">Neue Panel-Version <b><?= e($updateNotice) ?></b> verfügbar – <a href="updates.php">zu den Updates</a></div>
+<?php endif;
 ?>
 <div class="card clock">
     <?php if (!$st['clocked_in']): ?>

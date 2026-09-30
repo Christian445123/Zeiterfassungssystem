@@ -111,6 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach (array_merge($schema, [SHIFTS_SQL]) as $sql) {
                 db()->exec($sql);
             }
+            migrate();
             q('INSERT INTO users (username, password_hash, full_name, role) VALUES (?, ?, ?, ?)',
                 [$user, password_hash($pass, PASSWORD_DEFAULT), $name, 'admin']);
             $licKey = random_license_key();

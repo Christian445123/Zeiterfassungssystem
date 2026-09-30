@@ -1,2 +1,4 @@
 .env
 installed.lock
+storage/*
+!storage/.htaccess

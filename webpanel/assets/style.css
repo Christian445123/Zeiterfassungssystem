@@ -43,3 +43,4 @@ button.shift{cursor:pointer}button.shift:hover{background:rgba(37,99,235,.25)}
 .warnc{color:var(--warn)}button.ghost{background:none;color:var(--text);border-color:var(--line)}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--text);padding:20px;min-width:340px;max-width:92vw}
 dialog::backdrop{background:rgba(0,0,0,.45)}dialog h2{margin-top:0}
+.foot{margin-top:32px;color:var(--muted);font-size:12px;text-align:center}

@@ -100,6 +100,7 @@ function page_header(string $title, string $active = ''): void
         $nav[] = ['users.php', 'Mitarbeiter', 'users'];
         $nav[] = ['projects.php', 'Projekte', 'projects'];
         $nav[] = ['licenses.php', 'Lizenzen & API', 'lic'];
+        $nav[] = ['updates.php', 'Updates', 'upd'];
     }
     echo '<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">';
     echo '<title>' . e($title) . ' – ' . e(cfg('app_name')) . '</title><link rel="stylesheet" href="assets/style.css"></head><body>';
@@ -119,7 +120,7 @@ function page_header(string $title, string $active = ''): void
 
 function page_footer(): void
 {
-    echo '</main></body></html>';
+    echo '<footer class="foot">' . e(cfg('app_name')) . ' v' . e(panel_version()) . '</footer></main></body></html>';
 }
 
 function user_select(string $name, int $selected, bool $onlyActive = true, string $extra = ''): string
