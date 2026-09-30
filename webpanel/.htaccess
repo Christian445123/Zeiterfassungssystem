@@ -1,0 +1,5 @@
+# Sensible Dateien nie ausliefern
+<FilesMatch "^\.(env|git)|\.(lock|example)$">
+    Require all denied
+</FilesMatch>
+Options -Indexes
