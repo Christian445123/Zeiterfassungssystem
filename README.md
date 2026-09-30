@@ -43,3 +43,23 @@ Kommen/Gehen/Pause (Web + Client), Projekte, Notizen, manuelle Korrekturen (Admi
 ## Nicht enthalten / Hinweise
 - Feiertage werden nicht automatisch berücksichtigt; kein Offline-Modus im Client (Stempeln braucht Verbindung).
 - Der Code wurde nicht gegen einen laufenden PHP-/MySQL-Server getestet (auf dieser Maschine ist kein PHP installiert) – der C#-Client baut fehlerfrei.
+
+## Updates (Client + Webpanel)
+Alle Einstellungen: Panel → **Updates** (nur Admins).
+
+**Modi** (jeweils Aus / Nur benachrichtigen / Automatisch installieren):
+- *Webpanel* – im Panel einstellbar. „Automatisch“ prüft täglich; per Cron `0 4 * * * php /pfad/webpanel/cron_update.php`, ohne Cron beim Öffnen des Dashboards durch einen Admin.
+- *Desktop-Client* – Vorgabe im Panel, jeder Client kann sie unter *Konto → Einstellungen…* überschreiben („Vorgabe des Servers“ ist Standard). **Pflicht-Updates** werden immer installiert. Der Client prüft beim Start und alle 6 Stunden.
+
+**Neue Version veröffentlichen**
+1. Version hochzählen: `<Version>` in `client/Zeiterfassung.csproj` und/oder `webpanel/VERSION`.
+2. `powershell -File tools/build-release.ps1 -BaseUrl https://updates.example.com/zeiterfassung -Notes "Was ist neu"` → erzeugt in `dist/`:
+   - `zeiterfassung-client-x.y.z.zip` → im Panel unter *Updates → Desktop-Anwendung* hochladen (Clients laden es über die API, nur mit gültiger Lizenz/API-Key/Gerät).
+   - `webpanel-x.y.z.zip` + `manifest.json` → auf einen HTTPS-Server legen und die Manifest-URL als `PANEL_UPDATE_URL` in die `.env` eintragen. Alternativ das Panel-ZIP unter *Updates → Webpanel* direkt hochladen.
+
+**Ablauf & Sicherheit**
+- Panel: SHA-256 prüfen → automatisches Backup (letzte 5, mit „Wiederherstellen“) → Dateien ersetzen (`.env`, `storage/`, `install.php` bleiben unberührt) → Datenbank-Migrationen aus `webpanel/migrations/` laufen automatisch. Schlägt das Einspielen fehl, wird der alte Stand zurückgespielt.
+- Client: Download → SHA-256 gegen Server-Wert prüfen → Updater-Kopie ersetzt Dateien nach dem Beenden, bei Fehler Rollback → Neustart. Die Zeit läuft serverseitig weiter, ein Neustart unterbricht sie nicht.
+- Neue DB-Änderungen: Datei `webpanel/migrations/002_….php` mit einem Array idempotenter SQL-Statements anlegen.
+- Voraussetzungen: Panel-Ordner für PHP beschreibbar, PHP-Erweiterung `zip`; Client muss in einem beschreibbaren Ordner liegen (nicht *Program Files*), z. B. `%LocalAppData%\Zeiterfassung`.
+- Grenzen: Die Prüfsumme schützt vor beschädigten Downloads, nicht vor einem kompromittierten Server (keine Code-Signatur). Gelöschte Dateien früherer Versionen bleiben liegen. Bei nginx muss `storage/` selbst gesperrt werden (die `.htaccess` gilt nur für Apache).
