@@ -133,6 +133,9 @@ try {
             usleep(700000); // Brute-Force bremsen
             api_fail(401, 'Benutzername oder Passwort falsch.', 'login_failed');
         }
+        if (!empty($u['must_change_password'])) {
+            api_fail(403, 'Bitte zuerst im Webpanel das Standard-Passwort ändern.', 'password_change_required');
+        }
         $token = random_key('', 32);
         $days = (int)cfg('token_lifetime_days');
         q('INSERT INTO api_tokens (user_id, device_id, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))',

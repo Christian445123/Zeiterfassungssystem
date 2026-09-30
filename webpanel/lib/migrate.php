@@ -17,8 +17,8 @@ function migrate(): array
         if (in_array($name, $applied, true)) {
             continue;
         }
-        foreach ((require $file) as $sql) {
-            db()->exec($sql);
+        foreach ((require $file) as $step) {
+            is_callable($step) ? $step() : db()->exec($step);
         }
         q('INSERT IGNORE INTO schema_migrations (name) VALUES (?)', [$name]);
         $ran[] = $name;

@@ -67,6 +67,9 @@ function require_login(bool $admin = false): array
     if (!$u) {
         redirect('index.php');
     }
+    if (!empty($u['must_change_password']) && basename($_SERVER['SCRIPT_NAME']) !== 'password.php') {
+        redirect('password.php'); // Standard-Passwort erst ändern
+    }
     if ($admin && $u['role'] !== 'admin') {
         http_response_code(403);
         exit('Kein Zugriff.');
@@ -109,7 +112,7 @@ function page_header(string $title, string $active = ''): void
         foreach ($nav as [$href, $label, $key]) {
             echo '<a href="' . $href . '"' . ($key === $active ? ' class="on"' : '') . '>' . e($label) . '</a>';
         }
-        echo '</nav><div class="who">' . e($u['full_name']) . ' · <a href="logout.php">Abmelden</a></div></header>';
+        echo '</nav><div class="who">' . e($u['full_name']) . ' · <a href="password.php">Passwort</a> · <a href="logout.php">Abmelden</a></div></header>';
     }
     echo '<main><h1>' . e($title) . '</h1>';
     foreach ($_SESSION['flash'] ?? [] as [$type, $msg]) {

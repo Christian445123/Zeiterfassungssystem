@@ -97,23 +97,21 @@ $schema = [
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
 ];
 
+const DEFAULT_ADMIN_USER = 'admin';
+const DEFAULT_ADMIN_PASS = 'ChangeMe123!';
 $error = '';
 $result = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $user = trim($_POST['username'] ?? '');
-    $name = trim($_POST['full_name'] ?? '');
-    $pass = (string)($_POST['password'] ?? '');
     $customer = trim($_POST['customer'] ?? '') ?: 'Meine Firma';
-    if ($user === '' || $name === '' || strlen($pass) < 8) {
-        $error = 'Benutzername, Name und ein Passwort mit mindestens 8 Zeichen sind nötig.';
-    } else {
+    {
         try {
             foreach (array_merge($schema, [SHIFTS_SQL]) as $sql) {
                 db()->exec($sql);
             }
             migrate();
-            q('INSERT INTO users (username, password_hash, full_name, role) VALUES (?, ?, ?, ?)',
-                [$user, password_hash($pass, PASSWORD_DEFAULT), $name, 'admin']);
+            // Standard-Login; das Passwort muss beim ersten Login geändert werden
+            q('INSERT INTO users (username, password_hash, full_name, role, must_change_password) VALUES (?, ?, ?, ?, 1)',
+                [DEFAULT_ADMIN_USER, password_hash(DEFAULT_ADMIN_PASS, PASSWORD_DEFAULT), 'Administrator', 'admin']);
             $licKey = random_license_key();
             q('INSERT INTO licenses (license_key, customer, max_devices) VALUES (?, ?, 10)', [$licKey, $customer]);
             $licId = (int)db()->lastInsertId();
@@ -134,15 +132,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="flash ok">Installation abgeschlossen. Diese Werte werden nur jetzt angezeigt – bitte notieren!</div>
     <p><b>Lizenzschlüssel:</b><br><code><?= e($result['license']) ?></code></p>
     <p><b>API-Key:</b><br><code><?= e($result['api']) ?></code></p>
+    <p><b>Standard-Login:</b><br>Benutzername <code><?= e(DEFAULT_ADMIN_USER) ?></code> · Passwort <code><?= e(DEFAULT_ADMIN_PASS) ?></code><br>
+        <span class="muted">Das Passwort muss beim ersten Login geändert werden. Melde dich am besten sofort an.</span></p>
     <p>Lösche jetzt <code>install.php</code> und <a href="index.php">melde dich an</a>.</p>
 <?php else: ?>
     <?php if ($error): ?><div class="flash err"><?= e($error) ?></div><?php endif; ?>
     <p>Zuerst DB-Zugang in <code>.env</code> eintragen (Datenbank muss existieren).</p>
     <form method="post" class="stack">
         <label>Firmenname (Lizenznehmer)<input name="customer"></label>
-        <label>Admin-Benutzername<input name="username" required></label>
-        <label>Admin-Name<input name="full_name" required></label>
-        <label>Passwort (min. 8 Zeichen)<input type="password" name="password" required></label>
+        <p class="muted">Es wird ein Administrator mit Standard-Login angelegt (Passwortwechsel beim ersten Login erforderlich).</p>
         <button>Installieren</button>
     </form>
 <?php endif; ?>

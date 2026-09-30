@@ -216,10 +216,12 @@ function panel_extract_zip(string $zipFile, string $prefix): int
         if (file_put_contents($tmp, $data) === false) {
             throw new RuntimeException('Keine Schreibrechte für ' . $rel);
         }
-        if (!rename($tmp, $target)) {
+        // rename() ist atomar; unter Windows scheitert es bei gerade ausgeführten Dateien -> dann direkt überschreiben
+        if (!@rename($tmp, $target) && !@copy($tmp, $target)) {
             @unlink($tmp);
             throw new RuntimeException('Datei kann nicht ersetzt werden: ' . $rel);
         }
+        @unlink($tmp);
         $count++;
     }
     $zip->close();
