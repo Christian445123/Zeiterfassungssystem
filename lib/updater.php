@@ -130,7 +130,8 @@ function run_shell_command(string $command, string $cwd): array
     if (!function_exists('proc_open')) {
         return [1, '', 'proc_open() ist auf diesem Server deaktiviert.'];
     }
-    $env = ['GIT_TERMINAL_PROMPT' => '0', 'HOME' => storage_dir('git-home'), 'PATH' => (string)getenv('PATH')];
+    // komplette Umgebung durchreichen (Proxy, SystemRoot unter Windows, …); nur Git-Eigenheiten überschreiben
+    $env = array_merge(getenv() ?: [], ['GIT_TERMINAL_PROMPT' => '0', 'HOME' => storage_dir('git-home')]);
     $p = @proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $cwd, $env);
     if (!is_resource($p)) {
         return [1, '', "Befehl konnte nicht gestartet werden: $command"];
@@ -187,7 +188,13 @@ function panel_update_git(): array
             . "\n\nBitte per SSH sichern/committen oder verwerfen (git checkout -- <Datei>), dann erneut versuchen.\n"];
     }
     $log .= "OK, keine lokalen Änderungen.\n\n== git pull --ff-only ==\n";
-    [$code, $out, $err] = run_shell_command(git_cmd('pull --ff-only origin ' . escapeshellarg(github_branch())), PANEL_ROOT);
+    // Quelle immer aus GITHUB_REPO (.env), nicht aus der im Checkout gespeicherten Remote-Adresse (kann veraltet/falsch sein)
+    $url = 'https://github.com/' . github_repo() . '.git';
+    $auth = '';
+    if (($tok = trim((string)cfg('github_token'))) !== '') {
+        $auth = ' -c ' . escapeshellarg('http.https://github.com/.extraheader=AUTHORIZATION: basic ' . base64_encode('x-access-token:' . $tok));
+    }
+    [$code, $out, $err] = run_shell_command(git_cmd(ltrim($auth) . ' pull --ff-only ' . escapeshellarg($url) . ' ' . escapeshellarg(github_branch())), PANEL_ROOT);
     $log .= $out . $err;
     if ($code !== 0) {
         $hint = (stripos($err, 'permission') !== false || stripos($err, 'unable to create') !== false)
