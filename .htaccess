@@ -1,0 +1,7 @@
+# Sensible Dateien und Ordner nie ausliefern
+<FilesMatch "^\.(env|git)|\.(lock|example|md|sql|json)$">
+    Require all denied
+</FilesMatch>
+# Git-Ordner (bei einem git clone auf dem Server) komplett sperren
+RedirectMatch 404 /\.git
+Options -Indexes
