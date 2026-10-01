@@ -17,7 +17,7 @@ Webanwendung (PHP 8.1+, MySQL/MariaDB) für einen Betrieb mit mehreren Mitarbeit
 
 ## Einrichtung
 
-1. Repository auf dem Server klonen (`git clone <repo-url> .` in das Web-Verzeichnis).
+1. Repository auf dem Server klonen: `git clone https://github.com/Christian445123/Zeiterfassungssystem.git .` (in das Web-Verzeichnis; bei privatem Repo mit Deploy-Key oder Token). In der `.env` danach `GITHUB_REPO=Christian445123/Zeiterfassungssystem` eintragen.
 2. Leere Datenbank anlegen, `.env.example` nach `.env` kopieren und ausfüllen (`DB_*`).
 3. Im Browser `install.php` aufrufen → legt alle Tabellen an und den Standard-Login **Personalnummer `1000` / Passwort `ChangeMe123!`** (muss beim ersten Login geändert werden). Danach sperrt sich `install.php` selbst.
 4. Unter *Mitarbeiter* die Mitarbeiter mit Arbeitszeitmodell anlegen, unter *Betrieb* die Öffnungszeiten prüfen.
