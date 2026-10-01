@@ -21,7 +21,7 @@ if (is_post()) {
     $error = 'Personalnummer oder Passwort falsch.';
 }
 ?><!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Login – <?= e(cfg('app_name')) ?></title><link rel="stylesheet" href="assets/style.css"></head><body class="login-page">
+<title>Login – <?= e(cfg('app_name')) ?></title><link rel="stylesheet" href="<?= e(css_url()) ?>"></head><body class="login-page">
 <main class="login-card">
 <div class="login-logo">⏱</div>
 <h1><?= e(cfg('app_name')) ?></h1>
