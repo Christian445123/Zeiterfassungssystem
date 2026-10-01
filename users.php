@@ -62,6 +62,8 @@ page_header('Mitarbeiter', 'users');
         </fieldset>
         <label><?= $edit ? 'Neues Passwort (leer = unverändert; muss beim nächsten Login geändert werden)' : 'Start-Passwort (min. 8 Zeichen; muss beim ersten Login geändert werden)' ?>
             <input type="password" name="password" <?= $edit ? '' : 'required' ?> autocomplete="new-password"></label>
+        <label class="check"><input type="checkbox" name="time_tracking" value="1" <?= !$edit || !array_key_exists('time_tracking', $edit) || (int)$edit['time_tracking'] === 1 ? 'checked' : '' ?>>
+            Zeiterfassung aktiv <span class="muted">(Stunden, Dienstplan, Urlaub – für reine Verwaltungskonten wie den Administrator ausschalten)</span></label>
         <?php if ($edit): ?><label class="check"><input type="checkbox" name="active" <?= $edit['active'] ? 'checked' : '' ?>> Aktiv (kann sich anmelden)</label><?php endif; ?>
         <div class="row" style="justify-content:flex-start"><button><?= $edit ? 'Speichern' : 'Anlegen' ?></button><?php if ($edit): ?><a class="btn ghost" href="users.php">Abbrechen</a><?php endif; ?></div>
     </form>
@@ -73,7 +75,7 @@ page_header('Mitarbeiter', 'users');
     <?php foreach ($users as $u):
         $ov = user_overview($u); $v = $ov['vacation']; ?>
         <tr class="<?= $u['active'] ? '' : 'weekend' ?>">
-            <td><?= e($u['personnel_number']) ?></td><td><?= e($u['full_name']) ?></td><td><?= e($ov['role']) ?></td>
+            <td><?= e($u['personnel_number']) ?></td><td><?= e($u['full_name']) ?></td><td><?= e($ov['role']) ?><?= $ov['time_tracking'] ? '' : ' <span class="tag">Verwaltung</span>' ?></td>
             <td><?= e($u['weekly_hours']) ?></td>
             <td><?= e(implode(' · ', array_map(fn($d, $h) => WEEKDAY_SHORT[$d] . ' ' . rtrim(rtrim(number_format($h, 2, ',', ''), '0'), ','), array_keys($ov['day_hours']), $ov['day_hours']))) ?></td>
             <td><?= $num($v['remaining']) ?> / <?= $num($v['entitlement'] + $v['carryover']) ?></td>

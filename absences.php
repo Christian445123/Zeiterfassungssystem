@@ -36,13 +36,13 @@ $num = fn(float $v): string => rtrim(rtrim(number_format($v, 1, ',', ''), '0'), 
 
 page_header('Abwesenheiten', 'abs');
 ?>
-<div class="cards">
+<?php if (user_tracks($me)): ?><div class="cards">
     <div class="card"><div class="lbl">Mein Urlaubsanspruch <?= (int)$vac['year'] ?></div><div class="val"><?= $num($vac['entitlement'] + $vac['carryover']) ?> <small>Tage</small></div>
         <div class="muted"><?= (float)cfg('vacation_weeks') ?> Wochen automatisch<?= $vac['carryover'] > 0 ? ' + ' . $num($vac['carryover']) . ' Übertrag' : '' ?></div></div>
     <div class="card"><div class="lbl">Genommen</div><div class="val"><?= $num($vac['taken']) ?></div><div class="muted"><?= $num($vac['pending']) ?> beantragt</div></div>
     <div class="card"><div class="lbl">Resturlaub</div><div class="val <?= $vac['remaining'] < 0 ? 'neg' : 'pos' ?>"><?= $num($vac['remaining']) ?></div></div>
     <div class="card"><div class="lbl">Krank / Arzt / ZA</div><div class="val"><?= $num($vac['sick_days']) ?> / <?= $num($vac['doctor_days']) ?> / <?= $num($vac['comp_days']) ?> <small>Tage</small></div></div>
-</div>
+</div><?php endif; ?>
 
 <form method="post" class="row filter card">
     <?= csrf_field() ?><input type="hidden" name="action" value="create">

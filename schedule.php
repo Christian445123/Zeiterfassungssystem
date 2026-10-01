@@ -6,9 +6,12 @@ $admin = can('schedule.edit');
 $seeAll = can('hours.view_all');
 $seeOwn = can('hours.own');
 
-$ref = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_REQUEST['week'] ?? '')) ? $_REQUEST['week'] : 'today';
+$view = ($_REQUEST['view'] ?? '') === 'day' ? 'day' : 'week';
+$isDate = fn($v) => is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) && valid_date($v);
+$day = $isDate($_REQUEST['date'] ?? null) ? $_REQUEST['date'] : date('Y-m-d');
+$ref = $view === 'day' ? $day : ($isDate($_REQUEST['week'] ?? null) ? $_REQUEST['week'] : 'today');
 [$ws, $we] = week_bounds($ref);
-$self = 'schedule.php?week=' . $ws;
+$self = $view === 'day' ? 'schedule.php?view=day&date=' . $day : 'schedule.php?week=' . $ws;
 
 if (is_post()) {
     if (!$admin) {
@@ -47,12 +50,23 @@ $statusLabel = [
 
 page_header('Dienstplan', 'schedule');
 ?>
-<div class="row filter">
-    <a class="btn" href="schedule.php?week=<?= e(date('Y-m-d', strtotime("$ws -7 days"))) ?>">‹ Vorwoche</a>
-    <a class="btn" href="schedule.php">Diese Woche</a>
-    <a class="btn" href="schedule.php?week=<?= e(date('Y-m-d', strtotime("$ws +7 days"))) ?>">Nächste Woche ›</a>
+<div class="row filter" style="align-items:center">
+    <div class="seg">
+        <a class="btn <?= $view === 'week' ? '' : 'ghost' ?>" href="schedule.php?week=<?= e($ws) ?>">Woche</a>
+        <a class="btn <?= $view === 'day' ? '' : 'ghost' ?>" href="schedule.php?view=day&date=<?= e($view === 'day' ? $day : (($today ?? date('Y-m-d')) >= $ws && ($today ?? date('Y-m-d')) <= $we ? date('Y-m-d') : $ws)) ?>">Tag</a>
+    </div>
+    <?php if ($view === 'day'): ?>
+        <a class="btn ghost" href="schedule.php?view=day&date=<?= e(date('Y-m-d', strtotime("$day -1 day"))) ?>">‹ Vortag</a>
+        <a class="btn ghost" href="schedule.php?view=day">Heute</a>
+        <a class="btn ghost" href="schedule.php?view=day&date=<?= e(date('Y-m-d', strtotime("$day +1 day"))) ?>">Nächster Tag ›</a>
+        <form method="get" style="display:inline"><input type="hidden" name="view" value="day"><input type="date" name="date" value="<?= e($day) ?>" onchange="this.form.submit()"></form>
+    <?php else: ?>
+        <a class="btn ghost" href="schedule.php?week=<?= e(date('Y-m-d', strtotime("$ws -7 days"))) ?>">‹ Vorwoche</a>
+        <a class="btn ghost" href="schedule.php">Diese Woche</a>
+        <a class="btn ghost" href="schedule.php?week=<?= e(date('Y-m-d', strtotime("$ws +7 days"))) ?>">Nächste Woche ›</a>
+    <?php endif; ?>
     <b>KW <?= (int)$data['kw'] ?> · <?= e(fmt_d($ws)) ?> – <?= e(fmt_d($we)) ?></b>
-    <?php if ($admin): ?>
+    <?php if ($admin && $view === 'week'): ?>
         <form method="post" onsubmit="return confirm('Alle Schichten der Vorwoche in diese Woche kopieren?')">
             <?= csrf_field() ?><input type="hidden" name="week" value="<?= e($ws) ?>"><input type="hidden" name="action" value="copy_prev">
             <button class="ghost">Vorwoche kopieren</button>
@@ -60,6 +74,7 @@ page_header('Dienstplan', 'schedule');
     <?php endif; ?>
 </div>
 
+<?php if ($view === 'day'): include __DIR__ . '/lib/schedule_day.php'; else: ?>
 <h2>Dienstplan (Soll) – geplante Schichten</h2>
 <div class="plan-wrap">
 <table class="plan">
@@ -160,15 +175,18 @@ page_header('Dienstplan', 'schedule');
 </table>
 </div>
 <?php endif; ?>
+<?php endif; // Ende Wochenansicht ?>
+<?php if ($view === 'week'): ?>
 <p class="muted">Soll = Wochenstunden laut Arbeitszeitmodell (ohne Feiertage und Abwesenheiten). Plan = eingeteilte Schichten (Länge minus Pause). Ist = eingetragene Arbeitszeit.
     Verspätet = mehr als 10 Min. nach Schichtbeginn; Ende vor Beginn = Schicht über Mitternacht.</p>
+<?php endif; ?>
 
 <?php if ($admin): ?>
 <dialog id="dlg">
     <form method="post" class="stack">
         <h2 id="dlgTitle">Schicht</h2>
         <?= csrf_field() ?>
-        <input type="hidden" name="week" value="<?= e($ws) ?>">
+        <input type="hidden" name="week" value="<?= e($ws) ?>"><input type="hidden" name="view" value="<?= e($view) ?>"><input type="hidden" name="date" value="<?= e($day) ?>">
         <input type="hidden" name="id" id="f_id" value="0">
         <label>Mitarbeiter <select name="user_id" id="f_user"><?php foreach ($data['users'] as $u): ?><option value="<?= $u['id'] ?>"><?= e($u['name']) ?></option><?php endforeach; ?></select></label>
         <label>Datum <input type="date" name="shift_date" id="f_date" required></label>

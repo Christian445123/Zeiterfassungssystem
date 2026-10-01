@@ -206,8 +206,17 @@ function absence_days(int $uid, string $from, string $to): array
  * (bei Teilzeit-Abwesenheit mit „hours“ nur um diese Stunden reduziert). Zeitausgleich lässt das Soll stehen –
  * dadurch sinkt der Überstundenkonto-Saldo automatisch.
  */
+/** Wird für diesen Benutzer Zeit erfasst? Verwaltungskonten (z. B. Administrator) haben kein Soll, keine Stunden und keinen Dienstplan. */
+function user_tracks(array $u): bool
+{
+    return !array_key_exists('time_tracking', $u) || (int)$u['time_tracking'] === 1;
+}
+
 function day_target(array $u, string $date, ?array $abs): int
 {
+    if (!user_tracks($u)) {
+        return 0;
+    }
     if (!in_array((int)date('N', strtotime($date)), user_workdays($u), true)) {
         return 0;
     }
@@ -272,6 +281,9 @@ function week_summary(array $u, ?string $ref = null): array
  */
 function overtime_balance(array $u, ?string $upTo = null): array
 {
+    if (!user_tracks($u)) {
+        return ['work_seconds' => 0, 'adjust_seconds' => 0, 'seconds' => 0, 'since' => user_start_date($u)];
+    }
     $today = date('Y-m-d');
     $to = ($upTo === null || $upTo > $today) ? $today : $upTo;
     $from = user_start_date($u);
@@ -392,7 +404,7 @@ function schedule_week_data(string $ref = 'today', ?array $viewer = null): array
 
     $users = [];
     $dayPlan = $dayIst = $dayPlanned = $dayPresent = array_fill_keys($days, 0);
-    foreach (q_all('SELECT * FROM users WHERE active = 1 ORDER BY full_name') as $u) {
+    foreach (q_all('SELECT * FROM users WHERE active = 1 AND time_tracking = 1 ORDER BY full_name') as $u) {
         $uid = (int)$u['id'];
         // Anwesenheit (Ist) und Soll sieht jeder nur fuer sich selbst, ausser mit dem Recht "hours.view_all"
         $showActual = $viewer === null || user_can($viewer, 'hours.view_all') || ($uid === (int)$viewer['id'] && user_can($viewer, 'hours.own'));
@@ -477,7 +489,7 @@ function absence_calendar_data(string $month, array $viewer): array
     }
     $manage = user_can($viewer, 'absences.manage');
     $users = [];
-    foreach (q_all('SELECT * FROM users WHERE active = 1 ORDER BY full_name') as $u) {
+    foreach (q_all('SELECT * FROM users WHERE active = 1 AND time_tracking = 1 ORDER BY full_name') as $u) {
         $uid = (int)$u['id'];
         $full = $manage || $uid === (int)$viewer['id'];
         $abs = absences_by_day($uid, $from, $to, false);

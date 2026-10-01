@@ -14,7 +14,8 @@ if (is_post() && ($_POST['action'] ?? '') === 'save_entry') {
 }
 
 $d = dashboard_data($me);
-$recent = can('hours.own') ? array_slice(entries_between((int)$me['id'], date('Y-m-d', strtotime('-60 days')), date('Y-m-d')), 0, 8) : [];
+$tracks = user_tracks($me);
+$recent = can('hours.own') && $tracks ? array_slice(entries_between((int)$me['id'], date('Y-m-d', strtotime('-60 days')), date('Y-m-d')), 0, 8) : [];
 
 // Update-Hinweis + Auto-Update nur für Rolleninhaber mit Update-Recht
 $updateNotice = null;
@@ -36,7 +37,11 @@ if ($updateNotice): ?>
     <div class="flash ok">Neue Panel-Version <b><?= e($updateNotice) ?></b> verfügbar – <a href="updates.php">zu den Updates</a></div>
 <?php endif; ?>
 
-<?php if (can('hours.own')): ?>
+<?php if (!$tracks): ?>
+    <div class="flash ok">Dies ist ein <b>Verwaltungskonto</b>: Hier wird keine Zeit erfasst. Du kannst Mitarbeiter einteilen (Dienstplan), Urlaube und Rollen verwalten und Einstellungen vornehmen.</div>
+<?php endif; ?>
+
+<?php if (can('hours.own') && $tracks): ?>
 <div class="cards">
     <div class="card"><div class="lbl">Heute</div><div class="val"><?= fmt_hm($d['today_seconds']) ?> h</div></div>
     <div class="card"><div class="lbl">Diese Woche</div><div class="val"><?= fmt_hm($d['week']['worked']) ?> <small>/ <?= fmt_hm($d['week']['target']) ?> h</small></div></div>

@@ -131,3 +131,17 @@ table.cal th.today{background:var(--pri);color:#fff}table.cal td.cnt{font-weight
 .cal-u,.cal-k,.cal-a,.cal-z,.cal-s,.cal-away{display:inline-block;min-width:22px;padding:1px 4px;border-radius:6px;font-weight:700;font-size:12px;color:#fff}
 .cal-u{background:#16a34a}.cal-k{background:#dc2626}.cal-a{background:#7c3aed}.cal-z{background:#0891b2}.cal-s{background:#64748b}.cal-away{background:#94a3b8}
 .pend{opacity:.5;outline:1px dashed currentColor}
+
+/* ---------- Schichtplan: Ansichtsumschalter und Tagesansicht ---------- */
+.seg{display:inline-flex;gap:0}.seg .btn{border-radius:0}.seg .btn:first-child{border-radius:9px 0 0 9px}.seg .btn:last-child{border-radius:0 9px 9px 0}
+table.planday{table-layout:fixed;min-width:760px}
+table.planday th.hr{font-size:11px;padding:6px 2px;text-align:left;border-right:1px solid var(--line)}
+table.planday th.sumcol,table.planday td.sums{width:110px}
+table.planday td.slot{padding:3px 1px;height:46px;border-right:1px dotted var(--line)}
+table.planday td.openslot{background:rgba(37,99,235,.045)}
+table.planday .shift{height:40px;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;white-space:nowrap;font-size:12px;line-height:1.2}
+table.planday td.cov{text-align:center;font-weight:650;font-size:12px;padding:6px 0}
+table.planday td.cov.gap{background:rgba(220,38,38,.2);color:var(--err)}
+table.planday td.cov.okc{background:rgba(22,163,74,.16)}
+table.planday td.cov.offc{color:var(--muted);background:var(--soft)}
+table.planday .add{margin-top:4px;font-size:12px;padding:2px 8px}

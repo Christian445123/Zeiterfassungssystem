@@ -45,9 +45,12 @@ function entry_save(array $actor, array $in): int
     } else {
         require_perm($actor, 'hours.own');
     }
-    $target = q_one('SELECT id FROM users WHERE id = ?', [$uid]);
+    $target = q_one('SELECT * FROM users WHERE id = ?', [$uid]);
     if (!$target) {
         throw new DomainException('Mitarbeiter nicht gefunden.');
+    }
+    if (!user_tracks($target)) {
+        throw new DomainException('Für dieses Konto wird keine Zeit erfasst (Verwaltungskonto).');
     }
 
     $date = (string)($in['date'] ?? '');
@@ -130,8 +133,8 @@ function absence_create(array $actor, array $in): int
         }
     }
     $uid = $manage ? (int)(($in['user_id'] ?? 0) ?: $actor['id']) : (int)$actor['id'];
-    if (!q_one('SELECT id FROM users WHERE id = ?', [$uid])) {
-        throw new DomainException('Mitarbeiter nicht gefunden.');
+    if (!($tu = q_one('SELECT * FROM users WHERE id = ?', [$uid])) || !user_tracks($tu)) {
+        throw new DomainException('Mitarbeiter nicht gefunden oder Konto ohne Zeiterfassung.');
     }
     q('INSERT INTO absences (user_id, type, date_from, date_to, hours, note, status) VALUES (?,?,?,?,?,?,?)',
         [$uid, $type, $from, $to, $hours, mb_substr(trim((string)($in['note'] ?? '')), 0, 255), $manage ? 'approved' : 'pending']);
@@ -172,7 +175,7 @@ function shift_save(array $actor, array $in): array
     $st = (string)($in['start_time'] ?? '');
     $en = (string)($in['end_time'] ?? '');
     $brk = max(0, (int)($in['break_min'] ?? 0));
-    if (!q_one('SELECT id FROM users WHERE id = ? AND active = 1', [$uid]) || !valid_date($date) || !valid_hhmm($st) || !valid_hhmm($en)) {
+    if (!q_one('SELECT id FROM users WHERE id = ? AND active = 1 AND time_tracking = 1', [$uid]) || !valid_date($date) || !valid_hhmm($st) || !valid_hhmm($en)) {
         throw new DomainException('Bitte Mitarbeiter, Datum und gültige Zeiten (HH:MM) angeben.');
     }
     if ($st === $en) {
@@ -302,6 +305,7 @@ function user_save(array $actor, array $in): int
         throw new DomainException('Ungültiges Eintrittsdatum.');
     }
     $start = $start === '' ? null : $start;
+    $tt = !empty($in['time_tracking']) ? 1 : 0; // 0 = Verwaltungskonto: keine Stunden, kein Dienstplan, kein Urlaub
     $pass = (string)($in['password'] ?? '');
     if ($pass !== '' && strlen($pass) < 8) {
         throw new DomainException('Passwort: mindestens 8 Zeichen.');
@@ -319,9 +323,9 @@ function user_save(array $actor, array $in): int
             $pn = $pn !== '' ? $pn : next_personnel_number();
             // Neues Passwort muss beim ersten Login geändert werden
             q('INSERT INTO users (username, personnel_number, password_hash, full_name, role, role_id, weekly_hours, work_days, day_hours,
-                                  vacation_days_override, vacation_carryover, vacation_carryover_year, start_date, must_change_password)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)',
-                [$pn, $pn, password_hash($pass, PASSWORD_DEFAULT), $name, $legacyRole, $role['id'], $hours, implode(',', $wd), $dh, $vac, $carry, $carryYear, $start]);
+                                  vacation_days_override, vacation_carryover, vacation_carryover_year, start_date, time_tracking, must_change_password)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)',
+                [$pn, $pn, password_hash($pass, PASSWORD_DEFAULT), $name, $legacyRole, $role['id'], $hours, implode(',', $wd), $dh, $vac, $carry, $carryYear, $start, $tt]);
             return (int)db()->lastInsertId();
         }
         $active = !empty($in['active']) ? 1 : 0;
@@ -329,8 +333,8 @@ function user_save(array $actor, array $in): int
             throw new DomainException('Du kannst dich nicht selbst deaktivieren und dir nicht selbst eine andere Rolle geben.');
         }
         q('UPDATE users SET full_name=?, role=?, role_id=?, weekly_hours=?, work_days=?, day_hours=?, vacation_days_override=?, vacation_carryover=?,
-                            vacation_carryover_year=?, start_date=?, active=? WHERE id=?',
-            [$name, $legacyRole, $role['id'], $hours, implode(',', $wd), $dh, $vac, $carry, $carryYear, $start, $active, $id]);
+                            vacation_carryover_year=?, start_date=?, time_tracking=?, active=? WHERE id=?',
+            [$name, $legacyRole, $role['id'], $hours, implode(',', $wd), $dh, $vac, $carry, $carryYear, $start, $tt, $active, $id]);
         if ($pn !== '') {
             q('UPDATE users SET personnel_number = ? WHERE id = ?', [$pn, $id]);
         }
@@ -372,7 +376,7 @@ function user_overview(array $u): array
         'vacation_days_override' => isset($u['vacation_days_override']) ? (float)$u['vacation_days_override'] : null,
         'vacation_carryover' => (float)($u['vacation_carryover'] ?? 0),
         'vacation_carryover_year' => isset($u['vacation_carryover_year']) ? (int)$u['vacation_carryover_year'] : null,
-        'start_date' => !empty($u['start_date']) ? $u['start_date'] : null,
+        'start_date' => !empty($u['start_date']) ? $u['start_date'] : null, 'time_tracking' => user_tracks($u),
         'must_change_password' => !empty($u['must_change_password']),
         'vacation' => vacation_summary($u, (int)date('Y')), 'overtime_seconds' => overtime_balance($u)['seconds'],
     ];

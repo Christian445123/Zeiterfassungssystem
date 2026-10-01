@@ -22,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $fullRole = (int)q_one("SELECT id FROM roles WHERE name = 'Vollzugriff'")['id'];
         // Standard-Login; das Passwort muss beim ersten Login geändert werden
-        q('INSERT INTO users (username, personnel_number, password_hash, full_name, role, role_id, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1)',
+        q('INSERT INTO users (username, personnel_number, password_hash, full_name, role, role_id, time_tracking, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 0, 1)',
             [DEFAULT_ADMIN_USER, DEFAULT_ADMIN_NUMBER, password_hash(DEFAULT_ADMIN_PASS, PASSWORD_DEFAULT), 'Administrator', 'admin', $fullRole]);
         file_put_contents(__DIR__ . '/installed.lock', date('c'));
         $done = true;

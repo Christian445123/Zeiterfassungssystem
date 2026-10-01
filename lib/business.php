@@ -114,7 +114,7 @@ function months_overview(string $month, array $viewer): array
     $all = user_can($viewer, 'hours.view_all') || user_can($viewer, 'reports.view_all') || user_can($viewer, 'months.close');
     $last = date('Y-m-t', strtotime($month . '-01'));
     $rows = [];
-    foreach (q_all('SELECT * FROM users WHERE active = 1 ORDER BY full_name') as $u) {
+    foreach (q_all('SELECT * FROM users WHERE active = 1 AND time_tracking = 1 ORDER BY full_name') as $u) {
         if (!$all && (int)$u['id'] !== (int)$viewer['id']) {
             continue;
         }

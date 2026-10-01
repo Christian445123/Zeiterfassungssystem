@@ -31,7 +31,7 @@ page_header('Zeiten', 'entries');
     <?php if ($viewAll): ?>
         <label>Mitarbeiter
             <select name="user"><option value="0">Alle</option>
-                <?php foreach (q_all('SELECT id, full_name FROM users ORDER BY full_name') as $u): ?>
+                <?php foreach (q_all('SELECT id, full_name FROM users WHERE time_tracking = 1 ORDER BY full_name') as $u): ?>
                     <option value="<?= (int)$u['id'] ?>" <?= (int)$u['id'] === $filterUser ? 'selected' : '' ?>><?= e($u['full_name']) ?></option>
                 <?php endforeach; ?>
             </select></label>

@@ -77,7 +77,7 @@ function dashboard_data(array $u): array
                 'note' => $s['note']];
         }
     }
-    $own = user_can($u, 'hours.own');
+    $own = user_can($u, 'hours.own') && user_tracks($u);
     $month = null;
     if ($own) {
         $m = date('Y-m');

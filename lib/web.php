@@ -146,7 +146,8 @@ function page_footer(): void
 
 function user_select(string $name, int $selected, bool $onlyActive = true, string $extra = ''): string
 {
-    $rows = q_all('SELECT id, full_name, personnel_number FROM users ' . ($onlyActive ? 'WHERE active = 1 ' : '') . 'ORDER BY full_name');
+    // nur Mitarbeiter mit Zeiterfassung (Verwaltungskonten wie der Administrator erscheinen nicht)
+    $rows = q_all('SELECT id, full_name, personnel_number FROM users WHERE time_tracking = 1 ' . ($onlyActive ? 'AND active = 1 ' : '') . 'ORDER BY full_name');
     $h = '<select name="' . e($name) . '" ' . $extra . '>';
     foreach ($rows as $r) {
         $h .= '<option value="' . (int)$r['id'] . '"' . ((int)$r['id'] === $selected ? ' selected' : '') . '>' . e($r['full_name']) . ' (' . e($r['personnel_number'] ?? '') . ')</option>';
