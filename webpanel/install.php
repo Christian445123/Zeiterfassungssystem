@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 ?><!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Installation</title>
-<link rel="stylesheet" href="assets/style.css"></head><body class="login-page"><main class="login-card">
+<link rel="stylesheet" href="<?= e(css_url()) ?>"></head><body class="login-page"><main class="login-card">
 <div class="login-logo">⏱</div>
 <h1>Installation</h1>
 <?php if ($done): ?>

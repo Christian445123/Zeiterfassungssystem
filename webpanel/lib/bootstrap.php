@@ -134,9 +134,16 @@ set_exception_handler(function (Throwable $e): void {
         http_response_code(500);
         header('Content-Type: text/html; charset=utf-8');
     }
-    echo '<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Fehler</title><link rel="stylesheet" href="assets/style.css"></head>'
+    echo '<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Fehler</title><link rel="stylesheet" href="' . css_url() . '"></head>'
         . '<body><main style="max-width:560px;margin-top:60px"><h1>Es ist ein Fehler aufgetreten</h1>'
         . '<div class="flash err">' . htmlspecialchars($hint, ENT_QUOTES, 'UTF-8') . '</div>'
         . ($detail !== '' ? '<pre style="white-space:pre-wrap">' . htmlspecialchars($detail, ENT_QUOTES, 'UTF-8') . '</pre>' : '')
         . '</main></body></html>';
 });
+
+/** URL der Stylesheet-Datei mit Änderungszeit, damit Browser nach einem Update nie eine veraltete Version aus dem Cache nehmen. */
+function css_url(): string
+{
+    $f = __DIR__ . '/../assets/style.css';
+    return 'assets/style.css?v=' . (is_file($f) ? filemtime($f) : 0);
+}

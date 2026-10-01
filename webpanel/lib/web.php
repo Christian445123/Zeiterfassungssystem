@@ -120,7 +120,7 @@ function page_header(string $title, string $active = ''): void
         $nav[] = ['updates.php', 'Updates', 'upd', $c('updates.manage')];
     }
     echo '<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">';
-    echo '<title>' . e($title) . ' – ' . e(cfg('app_name')) . '</title><link rel="stylesheet" href="assets/style.css"></head><body' . ($u ? ' class="app"' : '') . '>';
+    echo '<title>' . e($title) . ' – ' . e(cfg('app_name')) . '</title><link rel="stylesheet" href="' . e(css_url()) . '"></head><body' . ($u ? ' class="app"' : '') . '>';
     if ($u) {
         echo '<aside class="side"><div class="brand"><span class="logo">⏱</span> ' . e(cfg('app_name')) . '</div><nav>';
         foreach ($nav as [$href, $label, $key, $show]) {
