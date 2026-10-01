@@ -1,92 +1,78 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/lib/web.php';
-$me = require_login();
+$me = require_login('hours.own', 'reports.view_all');
 
 $month = preg_match('/^\d{4}-\d{2}$/', (string)($_GET['month'] ?? '')) ? $_GET['month'] : date('Y-m');
-$uid = selected_user_id($me);
+$uid = selected_user_id($me, 'reports.view_all');
 $user = q_one('SELECT * FROM users WHERE id = ?', [$uid]) ?? $me;
-$from = $month . '-01';
-$to = date('Y-m-t', strtotime($from));
-
-$byDay = [];
-foreach (entries_between($uid, $from, $to) as $r) {
-    $d = substr($r['start_time'], 0, 10);
-    $byDay[$d]['worked'] = ($byDay[$d]['worked'] ?? 0) + (int)$r['worked_sec'];
-    $byDay[$d]['break'] = ($byDay[$d]['break'] ?? 0) + (int)$r['break_sec'];
-    $byDay[$d]['first'] = min($byDay[$d]['first'] ?? $r['start_time'], $r['start_time']);
-    $last = $r['end_time'] ?? date('Y-m-d H:i:s');
-    $byDay[$d]['last'] = max($byDay[$d]['last'] ?? $last, $last);
-}
-$abs = absence_days($uid, $from, $to);
-$dailyTarget = (int)round((float)$user['weekly_hours'] / 5 * 3600);
-$wd = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
-
-$rows = [];
-$totWorked = $totTarget = 0;
-$absCount = ['vacation' => 0, 'sick' => 0, 'other' => 0];
-for ($t = strtotime($from); $t <= strtotime($to); $t = strtotime('+1 day', $t)) {
-    $d = date('Y-m-d', $t);
-    $dow = (int)date('w', $t);
-    $isWork = $dow >= 1 && $dow <= 5;
-    $target = ($isWork && !isset($abs[$d])) ? $dailyTarget : 0;
-    if ($isWork && isset($abs[$d])) {
-        $absCount[$abs[$d]]++;
-    }
-    $worked = $byDay[$d]['worked'] ?? 0;
-    $totWorked += $worked;
-    $totTarget += $target;
-    $rows[] = ['date' => $d, 'wd' => $wd[$dow], 'weekend' => !$isWork, 'first' => $byDay[$d]['first'] ?? null,
-        'last' => $byDay[$d]['last'] ?? null, 'break' => $byDay[$d]['break'] ?? 0, 'worked' => $worked,
-        'target' => $target, 'abs' => $abs[$d] ?? null];
-}
+$rep = report_data($user, $month);
+$showVacation = can('absences.request') || can('absences.manage');
 
 if (isset($_GET['csv'])) {
     header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="zeiten_' . preg_replace('/\W+/', '_', $user['username']) . '_' . $month . '.csv"');
+    header('Content-Disposition: attachment; filename="zeiten_' . preg_replace('/\W+/', '_', (string)$user['personnel_number']) . '_' . $month . '.csv"');
     echo "\xEF\xBB\xBF";
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Datum', 'Tag', 'Beginn', 'Ende', 'Pause', 'Arbeitszeit', 'Soll', 'Differenz', 'Abwesenheit'], ';');
-    foreach ($rows as $r) {
-        fputcsv($out, [fmt_d($r['date']), $r['wd'], $r['first'] ? date('H:i', strtotime($r['first'])) : '',
+    fputcsv($out, ['Datum', 'Tag', 'Beginn', 'Ende', 'Pause', 'Arbeitszeit', 'Soll', 'Differenz', 'Abwesenheit/Feiertag'], ';');
+    foreach ($rep['rows'] as $r) {
+        $note = $r['absence'] ? ABSENCE_TYPES[$r['absence']['type']] . ($r['absence']['hours'] ? ' ' . $r['absence']['hours'] . ' h' : '') : ($r['holiday'] ?? '');
+        fputcsv($out, [fmt_d($r['date']), $r['weekday'], $r['first'] ? date('H:i', strtotime($r['first'])) : '',
             $r['last'] ? date('H:i', strtotime($r['last'])) : '', fmt_hm($r['break']), fmt_hm($r['worked']),
-            fmt_hm($r['target']), fmt_hm($r['worked'] - $r['target']), $r['abs'] ? ABSENCE_TYPES[$r['abs']] : ''], ';');
+            fmt_hm($r['target']), fmt_hm($r['worked'] - $r['target']), $note], ';');
     }
-    fputcsv($out, ['Summe', '', '', '', '', fmt_hm($totWorked), fmt_hm($totTarget), fmt_hm($totWorked - $totTarget), ''], ';');
+    fputcsv($out, ['Summe', '', '', '', '', fmt_hm($rep['worked']), fmt_hm($rep['target']), fmt_hm($rep['balance']), ''], ';');
     exit;
 }
 
 page_header('Auswertung', 'reports');
 $qs = http_build_query(['month' => $month, 'user' => $uid]);
+$vac = $rep['vacation'];
+$num = fn(float $v): string => rtrim(rtrim(number_format($v, 1, ',', ''), '0'), ',');
 ?>
 <form method="get" class="row filter">
     <label>Monat <input type="month" name="month" value="<?= e($month) ?>"></label>
-    <?php if ($me['role'] === 'admin'): ?><label>Mitarbeiter <?= user_select('user', $uid, false) ?></label><?php endif; ?>
+    <?php if (can('reports.view_all')): ?><label>Mitarbeiter <?= user_select('user', $uid, false) ?></label><?php endif; ?>
     <button>Anzeigen</button>
-    <a class="btn" href="reports.php?<?= e($qs) ?>&csv=1">CSV-Export</a>
+    <a class="btn ghost" href="reports.php?<?= e($qs) ?>&csv=1">CSV-Export</a>
 </form>
+<p><b><?= e($user['full_name']) ?></b> · <?= e($user['weekly_hours']) ?> h/Woche · Arbeitstage: <?= e(implode(', ', array_map(fn($d) => WEEKDAY_SHORT[$d], user_workdays($user)))) ?></p>
+<?php $closing = month_closing((int)$user['id'], $month); ?>
+<?php if ($closing): ?><p><span class="tag approved">Monat abgeschlossen</span> <span class="muted">am <?= e(fmt_dt($closing['closed_at'])) ?> von <?= e($closing['closed_by_name'] ?? '') ?> · Arbeitszeit laut Abschluss <?= fmt_hm((int)$closing['worked_sec']) ?> h</span></p>
+<?php else: ?><p class="muted">Monat noch offen – <a href="months.php?month=<?= e($month) ?>">zum Monatsabschluss</a></p><?php endif; ?>
 
 <div class="cards">
-    <div class="card"><div class="lbl">Ist</div><div class="val"><?= fmt_hm($totWorked) ?> h</div></div>
-    <div class="card"><div class="lbl">Soll</div><div class="val"><?= fmt_hm($totTarget) ?> h</div></div>
-    <div class="card"><div class="lbl">Saldo</div><div class="val <?= $totWorked - $totTarget < 0 ? 'neg' : 'pos' ?>"><?= fmt_hm($totWorked - $totTarget) ?> h</div></div>
-    <div class="card"><div class="lbl">Urlaub / Krank</div><div class="val"><?= $absCount['vacation'] ?> / <?= $absCount['sick'] ?> Tage</div></div>
+    <div class="card"><div class="lbl">Ist</div><div class="val"><?= fmt_hm($rep['worked']) ?> h</div></div>
+    <div class="card"><div class="lbl">Soll</div><div class="val"><?= fmt_hm($rep['target']) ?> h</div></div>
+    <div class="card"><div class="lbl">Saldo Monat</div><div class="val <?= $rep['balance'] < 0 ? 'neg' : 'pos' ?>"><?= ($rep['balance'] > 0 ? '+' : '') . fmt_hm($rep['balance']) ?> h</div></div>
+    <div class="card"><div class="lbl">Plus-/Minusstunden gesamt</div><div class="val <?= $rep['overtime']['seconds'] < 0 ? 'neg' : 'pos' ?>"><?= ($rep['overtime']['seconds'] > 0 ? '+' : '') . fmt_hm($rep['overtime']['seconds']) ?> h</div>
+        <div class="muted">seit <?= e(fmt_d($rep['overtime']['since'])) ?><?= $rep['overtime']['adjust_seconds'] ? ' · davon Buchungen ' . fmt_hm($rep['overtime']['adjust_seconds']) . ' h' : '' ?></div></div>
 </div>
+<?php if ($showVacation): ?>
+<div class="cards">
+    <div class="card"><div class="lbl">Urlaubsanspruch <?= (int)$vac['year'] ?></div><div class="val"><?= $num($vac['entitlement']) ?> <small>Tage</small></div>
+        <div class="muted"><?= $num((float)$vac['carryover']) ?> Übertrag · <?= $num($vac['taken']) ?> genommen<?= $vac['pending'] > 0 ? ' · ' . $num($vac['pending']) . ' beantragt' : '' ?></div></div>
+    <div class="card"><div class="lbl">Resturlaub</div><div class="val <?= $vac['remaining'] < 0 ? 'neg' : '' ?>"><?= $num($vac['remaining']) ?> <small>Tage</small></div></div>
+    <div class="card"><div class="lbl">Krankenstand <?= (int)$vac['year'] ?></div><div class="val"><?= $num($vac['sick_days']) ?> <small>Tage</small></div></div>
+    <div class="card"><div class="lbl">Arzt / Zeitausgleich</div><div class="val"><?= $num($vac['doctor_days']) ?> / <?= $num($vac['comp_days']) ?> <small>Tage</small></div></div>
+</div>
+<?php endif; ?>
 
 <table>
-    <tr><th>Datum</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Ist</th><th>Soll</th><th>Saldo</th><th>Abwesenheit</th></tr>
-    <?php foreach ($rows as $r): ?>
-        <tr class="<?= $r['weekend'] ? 'weekend' : '' ?>">
-            <td><?= e($r['wd']) ?> <?= e(date('d.m.', strtotime($r['date']))) ?></td>
+    <tr><th>Datum</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Ist</th><th>Soll</th><th>Saldo</th><th>Hinweis</th></tr>
+    <?php foreach ($rep['rows'] as $r): ?>
+        <tr class="<?= $r['workday'] && !$r['holiday'] ? '' : 'weekend' ?>">
+            <td><?= e($r['weekday']) ?> <?= e(date('d.m.', strtotime($r['date']))) ?></td>
             <td><?= $r['first'] ? e(date('H:i', strtotime($r['first']))) : '' ?></td>
             <td><?= $r['last'] ? e(date('H:i', strtotime($r['last']))) : '' ?></td>
             <td><?= $r['break'] ? fmt_hm($r['break']) : '' ?></td>
             <td><?= $r['worked'] ? fmt_hm($r['worked']) : '' ?></td>
             <td><?= $r['target'] ? fmt_hm($r['target']) : '' ?></td>
             <td><?= ($r['worked'] || $r['target']) ? fmt_hm($r['worked'] - $r['target']) : '' ?></td>
-            <td><?= $r['abs'] ? e(ABSENCE_TYPES[$r['abs']]) : '' ?></td>
+            <td><?php if ($r['absence']): ?><span class="tag pending"><?= e(ABSENCE_TYPES[$r['absence']['type']]) ?><?= $r['absence']['hours'] ? ' ' . e($r['absence']['hours']) . ' h' : '' ?></span>
+                <?php elseif ($r['holiday']): ?><span class="tag"><?= e($r['holiday']) ?></span><?php endif; ?></td>
         </tr>
     <?php endforeach; ?>
 </table>
-<p class="muted">Soll = Wochenstunden ÷ 5 je Werktag (Mo–Fr), abzüglich genehmigter Abwesenheiten. Feiertage werden nicht berücksichtigt – dafür Abwesenheit „Sonstiges“ eintragen.</p>
+<p class="muted">Soll = Wochenstunden ÷ Arbeitstage je Arbeitstag – ohne Feiertage und (genehmigten) Urlaub, Krankenstand, Arzt und Sonstiges. Zeitausgleich lässt das Soll stehen und mindert dadurch das Überstundenkonto.</p>
 <?php page_footer();

@@ -36,3 +36,23 @@ function ensure_migrated(): array
     $done = true;
     return migrate();
 }
+
+function db_has_column(string $table, string $column): bool
+{
+    $r = q_one('SELECT COUNT(*) c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?', [$table, $column]);
+    return (int)$r['c'] > 0;
+}
+
+/** Spalte nur anlegen, wenn sie fehlt (MySQL kennt kein ADD COLUMN IF NOT EXISTS). */
+function db_add_column(string $table, string $column, string $definition): void
+{
+    if (!db_has_column($table, $column)) {
+        db()->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+    }
+}
+
+function db_has_index(string $table, string $index): bool
+{
+    $r = q_one('SELECT COUNT(*) c FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?', [$table, $index]);
+    return (int)$r['c'] > 0;
+}

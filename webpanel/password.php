@@ -23,7 +23,6 @@ if (is_post()) {
         flash('Das neue Passwort muss sich vom alten unterscheiden.', 'err');
     } else {
         q('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?', [password_hash($new, PASSWORD_DEFAULT), $me['id']]);
-        q('DELETE FROM api_tokens WHERE user_id = ?', [$me['id']]); // Desktop-Anmeldungen ungültig machen
         session_regenerate_id(true);
         flash('Passwort geändert.');
         redirect('dashboard.php');

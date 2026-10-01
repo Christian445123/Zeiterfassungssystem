@@ -2,3 +2,4 @@
 installed.lock
 storage/*
 !storage/.htaccess
+.claude/

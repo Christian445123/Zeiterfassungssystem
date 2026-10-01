@@ -2,14 +2,19 @@
 declare(strict_types=1);
 
 /**
- * Update-Logik:
- *  - Webpanel: Manifest prüfen (PANEL_UPDATE_URL in .env) oder ZIP hochladen -> Backup -> Dateien ersetzen -> Migrationen
- *  - Client-Releases: ZIPs liegen in storage/releases/ und werden über die API an die Clients verteilt
+ * Webpanel-Updates direkt aus GitHub (GITHUB_REPO / GITHUB_BRANCH in der .env).
+ *
+ * Zwei Wege, derselbe Button:
+ *  1. Git-Checkout (Server hat `git clone` des Repos und PHP darf `git` ausführen):  git pull --ff-only
+ *  2. Ohne Git (z. B. einfacher Webspace): ZIP des Branches von GitHub laden, Backup anlegen, Dateien ersetzen.
+ * Danach laufen neue Datenbank-Migrationen (migrations/) automatisch.
+ *
+ * Automatisch nach jedem Push: GitHub-Webhook auf deploy-webhook.php (DEPLOY_WEBHOOK_SECRET in der .env).
  */
 
 const PANEL_ROOT = __DIR__ . '/..';
-/** Diese Pfade überschreibt ein Panel-Update nie. */
-const PANEL_PROTECTED = ['.env', 'installed.lock', 'install.php'];
+/** Diese Pfade überschreibt der ZIP-Weg nie (der Git-Weg fasst ignorierte Dateien ohnehin nicht an). */
+const PANEL_PROTECTED = ['.env', 'installed.lock'];
 
 function valid_version(string $v): bool
 {
@@ -38,97 +43,162 @@ function storage_dir(string $sub): string
     return $dir;
 }
 
-function http_get(string $url, ?string $saveTo = null, int $maxBytes = 50000000): string
+// ---------------------------------------------------------------- GitHub-Zugriff
+
+function github_repo(): string
 {
-    if (!preg_match('#^https://#i', $url)) {
-        throw new RuntimeException('Update-URL muss mit https:// beginnen.');
+    $r = trim((string)cfg('github_repo'));
+    return preg_match('#^[\w.\-]+/[\w.\-]+$#', $r) ? $r : '';
+}
+
+function github_branch(): string
+{
+    $b = trim((string)cfg('github_branch'));
+    return preg_match('#^[\w./\-]+$#', $b) ? $b : 'main';
+}
+
+/** GET gegen GitHub (optional mit Token für private Repositories). Gibt den Body zurück oder speichert in $saveTo. */
+function github_get(string $url, ?string $saveTo = null, int $maxBytes = 80000000): string
+{
+    if (!str_starts_with($url, 'https://')) {
+        throw new RuntimeException('Nur https:// ist erlaubt.');
+    }
+    $headers = ['User-Agent: Zeiterfassung-Updater', 'Accept: application/vnd.github+json', 'X-GitHub-Api-Version: 2022-11-28'];
+    $token = trim((string)cfg('github_token'));
+    if ($token !== '') {
+        $headers[] = 'Authorization: Bearer ' . $token;
     }
     if (function_exists('curl_init')) {
         $ch = curl_init($url);
         $fp = $saveTo !== null ? fopen($saveTo, 'wb') : null;
-        $opts = [
-            CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 3,
-            CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => 180,
-            CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
-            CURLOPT_USERAGENT => 'Zeiterfassung-Updater', CURLOPT_FAILONERROR => true,
-        ];
+        $opts = [CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 4, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => 180,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_HTTPHEADER => $headers];
         $opts[$fp ? CURLOPT_FILE : CURLOPT_RETURNTRANSFER] = $fp ?: true;
         curl_setopt_array($ch, $opts);
         $body = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $err = curl_error($ch);
         curl_close($ch);
         if ($fp) {
             fclose($fp);
         }
         if ($body === false) {
-            throw new RuntimeException('Download fehlgeschlagen: ' . $err);
+            throw new RuntimeException('GitHub nicht erreichbar: ' . $err);
         }
         $body = $fp ? '' : (string)$body;
     } else {
-        $ctx = stream_context_create(['http' => ['timeout' => 180, 'user_agent' => 'Zeiterfassung-Updater', 'follow_location' => 1, 'max_redirects' => 3]]);
+        $ctx = stream_context_create(['http' => ['timeout' => 180, 'header' => implode("\r\n", $headers), 'follow_location' => 1, 'ignore_errors' => true]]);
         $data = @file_get_contents($url, false, $ctx, 0, $maxBytes + 1);
         if ($data === false) {
-            throw new RuntimeException('Download fehlgeschlagen (URL nicht erreichbar).');
+            throw new RuntimeException('GitHub nicht erreichbar.');
         }
-        if ($saveTo !== null) {
+        $code = 200;
+        foreach ($http_response_header ?? [] as $h) {
+            if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $m)) {
+                $code = (int)$m[1];
+            }
+        }
+        $body = $data;
+        if ($saveTo !== null && $code < 400) {
             file_put_contents($saveTo, $data);
             $body = '';
-        } else {
-            $body = $data;
         }
+    }
+    if ($code >= 400) {
+        if ($saveTo !== null) {
+            @unlink($saveTo);
+        }
+        throw new RuntimeException(match (true) {
+            $code === 404 => 'Repository oder Branch nicht gefunden (' . github_repo() . ' / ' . github_branch() . '). Ist das Repository privat, wird GITHUB_TOKEN in der .env benötigt.',
+            $code === 401 => 'GitHub-Token ist ungültig oder abgelaufen.',
+            $code === 403 => 'GitHub verweigert den Zugriff (Abfragelimit erreicht oder Token ohne Leserecht). Später erneut versuchen.',
+            default => "GitHub-Fehler $code.",
+        });
     }
     if ($saveTo !== null && filesize($saveTo) > $maxBytes) {
         @unlink($saveTo);
-        throw new RuntimeException('Update-Datei ist zu groß.');
+        throw new RuntimeException('Download ist zu groß.');
     }
     return $body;
 }
 
-// ---------------------------------------------------------------- Panel-Update
+// ---------------------------------------------------------------- Git-Checkout (Weg 1)
 
-/** Holt das Manifest {"version","url","sha256","notes"} und merkt es sich. */
-function panel_check_remote(): array
+/** @return array{0:int,1:string,2:string} [exitCode, stdout, stderr] */
+function run_shell_command(string $command, string $cwd): array
 {
-    $url = trim((string)cfg('panel_update_url'));
-    if ($url === '') {
-        throw new RuntimeException('PANEL_UPDATE_URL ist in der .env nicht gesetzt.');
+    if (!function_exists('proc_open')) {
+        return [1, '', 'proc_open() ist auf diesem Server deaktiviert.'];
     }
-    $raw = http_get($url, null, 200000);
-    $m = json_decode(preg_replace("/^\xEF\xBB\xBF/", "", $raw), true); // BOM tolerieren
-    if (!is_array($m) || !valid_version((string)($m['version'] ?? '')) || !preg_match('#^https://#i', (string)($m['url'] ?? ''))
-        || !preg_match('/^[a-f0-9]{64}$/i', (string)($m['sha256'] ?? ''))) {
-        throw new RuntimeException('Ungültiges Update-Manifest.');
+    $env = ['GIT_TERMINAL_PROMPT' => '0', 'HOME' => storage_dir('git-home'), 'PATH' => (string)getenv('PATH')];
+    $p = @proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $cwd, $env);
+    if (!is_resource($p)) {
+        return [1, '', "Befehl konnte nicht gestartet werden: $command"];
     }
-    $m = ['version' => $m['version'], 'url' => $m['url'], 'sha256' => strtolower($m['sha256']),
-        'notes' => mb_substr((string)($m['notes'] ?? ''), 0, 2000)];
-    setting_set('panel_latest', json_encode($m, JSON_UNESCAPED_UNICODE));
-    setting_set('panel_checked_at', (string)time());
-    return $m + ['available' => version_compare($m['version'], panel_version(), '>')];
+    $out = stream_get_contents($pipes[1]);
+    $err = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    return [proc_close($p), (string)$out, (string)$err];
 }
 
-/** Zuletzt bekanntes Manifest (ohne neue Abfrage) oder null. */
-function panel_latest_known(): ?array
+function git_cmd(string $args): string
 {
-    $m = json_decode(setting_get('panel_latest', ''), true);
-    if (!is_array($m) || !valid_version((string)($m['version'] ?? ''))) {
-        return null;
-    }
-    return $m + ['available' => version_compare($m['version'], panel_version(), '>')];
+    return 'git -c safe.directory=' . escapeshellarg((string)realpath(PANEL_ROOT)) . ' ' . $args;
 }
 
-function panel_install_remote(array $m): array
+/** Ist dieser Ordner ein Git-Checkout, in dem PHP git ausführen darf? */
+function panel_is_git(): bool
 {
-    $tmp = storage_dir('tmp') . '/panel-' . bin2hex(random_bytes(6)) . '.zip';
-    try {
-        http_get($m['url'], $tmp);
-        if (!hash_equals($m['sha256'], (string)hash_file('sha256', $tmp))) {
-            throw new RuntimeException('Prüfsumme (SHA-256) stimmt nicht – Update abgebrochen.');
+    static $r = null;
+    if ($r === null) {
+        $r = false;
+        if (is_dir(PANEL_ROOT . '/.git') && function_exists('proc_open')) {
+            [$code] = run_shell_command(git_cmd('rev-parse --is-inside-work-tree'), PANEL_ROOT);
+            $r = $code === 0;
         }
-        return panel_apply_zip($tmp, false, $m['version']);
-    } finally {
-        @unlink($tmp);
     }
+    return $r;
 }
+
+function panel_current_sha(): ?string
+{
+    if (panel_is_git()) {
+        [$code, $out] = run_shell_command(git_cmd('rev-parse HEAD'), PANEL_ROOT);
+        if ($code === 0 && preg_match('/^[0-9a-f]{40}/', trim($out))) {
+            return trim($out);
+        }
+    }
+    $s = setting_get('panel_sha', '');
+    return $s !== '' ? $s : null;
+}
+
+/** git pull --ff-only mit denselben Schutzprüfungen wie im Webpanel der Mitgliederverwaltung. */
+function panel_update_git(): array
+{
+    $log = "== Prüfe auf lokale Änderungen ==\n";
+    [$code, $out, $err] = run_shell_command(git_cmd('status --porcelain'), PANEL_ROOT);
+    if ($code !== 0) {
+        return ['success' => false, 'log' => $log . "Git-Status nicht lesbar.\n$err"];
+    }
+    $tracked = array_values(array_filter(explode("\n", trim($out)), fn($l) => $l !== '' && !str_starts_with($l, '??')));
+    if ($tracked) {
+        return ['success' => false, 'log' => $log . "Abgebrochen: nicht committete Änderungen an versionierten Dateien:\n" . implode("\n", $tracked)
+            . "\n\nBitte per SSH sichern/committen oder verwerfen (git checkout -- <Datei>), dann erneut versuchen.\n"];
+    }
+    $log .= "OK, keine lokalen Änderungen.\n\n== git pull --ff-only ==\n";
+    [$code, $out, $err] = run_shell_command(git_cmd('pull --ff-only origin ' . escapeshellarg(github_branch())), PANEL_ROOT);
+    $log .= $out . $err;
+    if ($code !== 0) {
+        $hint = (stripos($err, 'permission') !== false || stripos($err, 'unable to create') !== false)
+            ? "\nBerechtigungsproblem: Der Webserver-Benutzer darf im Ordner .git nicht schreiben. Einmalig per SSH: chown -R <webuser>: " . escapeshellarg((string)realpath(PANEL_ROOT)) . "\n"
+            : "\nMögliche Ursachen: Historie divergiert, kein Zugriff auf das (private) Repository (Deploy-Key/Token) oder falscher Branch.\n";
+        return ['success' => false, 'log' => $log . "\ngit pull fehlgeschlagen (Exit-Code $code).$hint"];
+    }
+    return ['success' => true, 'log' => $log];
+}
+
+// ---------------------------------------------------------------- ZIP-Weg (ohne Git)
 
 function panel_is_protected(string $rel): bool
 {
@@ -146,7 +216,7 @@ function safe_rel_path(string $rel): ?string
 
 function panel_backup(): string
 {
-    $file = storage_dir('backups') . '/panel-' . panel_version() . '-' . date('Ymd-His') . '.zip';
+    $file = storage_dir('backups') . '/panel-' . date('Ymd-His') . '.zip';
     $zip = new ZipArchive();
     if ($zip->open($file, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
         throw new RuntimeException('Backup konnte nicht angelegt werden (storage/ nicht beschreibbar?).');
@@ -228,8 +298,8 @@ function panel_extract_zip(string $zipFile, string $prefix): int
     return $count;
 }
 
-/** Spielt ein Panel-ZIP ein. Rückgabe: version, files, migrations, backup. */
-function panel_apply_zip(string $zipFile, bool $allowOlder = false, ?string $expectVersion = null): array
+/** Spielt ein Panel-ZIP ein (GitHub-Download oder Backup). Das Repository-Wurzelverzeichnis darf eine Ebene tiefer liegen (GitHub-ZIP). */
+function panel_apply_zip(string $zipFile): array
 {
     if (!class_exists('ZipArchive')) {
         throw new RuntimeException('Die PHP-Erweiterung „zip“ fehlt.');
@@ -239,36 +309,22 @@ function panel_apply_zip(string $zipFile, bool $allowOlder = false, ?string $exp
         throw new RuntimeException('ZIP-Datei kann nicht gelesen werden.');
     }
     $prefix = null;
-    $verIndex = null;
     $hasIndex = [];
     for ($i = 0; $i < $zip->numFiles; $i++) {
         $n = str_replace('\\', '/', (string)$zip->getNameIndex($i));
         if ($n === 'VERSION' || preg_match('#^[^/]+/VERSION$#', $n)) {
             if ($prefix === null || $n === 'VERSION') {
                 $prefix = substr($n, 0, -7);
-                $verIndex = $i;
             }
         }
         if ($n === 'index.php' || preg_match('#^[^/]+/index\.php$#', $n)) {
             $hasIndex[substr($n, 0, -9)] = true;
         }
     }
-    if ($prefix === null || !isset($hasIndex[$prefix])) {
-        $zip->close();
-        throw new RuntimeException('Kein gültiges Panel-Update (VERSION/index.php fehlen).');
-    }
-    $ver = trim((string)$zip->getFromIndex($verIndex));
     $zip->close();
-    if (!valid_version($ver)) {
-        throw new RuntimeException('Ungültige Version im Update-Paket.');
+    if ($prefix === null || !isset($hasIndex[$prefix])) {
+        throw new RuntimeException('Kein gültiges Webpanel-Paket (VERSION/index.php fehlen).');
     }
-    if ($expectVersion !== null && $ver !== $expectVersion) {
-        throw new RuntimeException("Paket enthält Version $ver, erwartet wurde $expectVersion.");
-    }
-    if (!$allowOlder && version_compare($ver, panel_version(), '<=')) {
-        throw new RuntimeException("Version $ver ist nicht neuer als die installierte (" . panel_version() . ').');
-    }
-
     $backup = panel_backup();
     try {
         $files = panel_extract_zip($zipFile, $prefix);
@@ -276,92 +332,149 @@ function panel_apply_zip(string $zipFile, bool $allowOlder = false, ?string $exp
         try {
             panel_extract_zip($backup, '');
         } catch (Throwable) {
-            // Rollback-Fehler: Original-Fehler ist wichtiger
+            // Rollback-Fehler: der Original-Fehler ist wichtiger
         }
         throw new RuntimeException('Update fehlgeschlagen (' . $e->getMessage() . ') – der vorherige Stand wurde wiederhergestellt.');
     }
-    if (function_exists('opcache_reset')) {
-        @opcache_reset();
-    }
-    try {
-        $ran = migrate();
-    } catch (Throwable $e) {
-        throw new RuntimeException("Dateien sind auf Version $ver, aber die Datenbank-Migration schlug fehl: " . $e->getMessage()
-            . ' – Backup: ' . basename($backup));
-    }
-    setting_set('panel_last_update', date('d.m.Y H:i') . ' → ' . $ver);
     panel_prune_backups(5);
-    return ['version' => $ver, 'files' => $files, 'migrations' => $ran, 'backup' => basename($backup)];
+    return ['files' => $files, 'backup' => basename($backup)];
 }
 
 function panel_restore(string $name): array
 {
-    if (!preg_match('/^panel-\d+\.\d+\.\d+-\d{8}-\d{6}\.zip$/', $name)) {
+    if (!preg_match('/^panel-\d{8}-\d{6}\.zip$/', $name)) {
         throw new RuntimeException('Ungültiger Backup-Name.');
     }
     $file = storage_dir('backups') . '/' . $name;
     if (!is_file($file)) {
         throw new RuntimeException('Backup nicht gefunden.');
     }
-    return panel_apply_zip($file, true);
+    $r = panel_apply_zip($file);
+    setting_set('panel_last_update', date('d.m.Y H:i') . ' → Backup ' . $name);
+    setting_set('panel_sha', '');
+    migrate();
+    return $r;
 }
 
-function panel_result_text(array $r): string
+function panel_update_zip(?string $sha): array
 {
-    return "Panel auf Version {$r['version']} aktualisiert ({$r['files']} Dateien, " . count($r['migrations'])
-        . " Migrationen). Backup: {$r['backup']}";
+    $repo = github_repo();
+    $tmp = storage_dir('tmp') . '/panel-' . bin2hex(random_bytes(6)) . '.zip';
+    $log = "== ZIP von GitHub laden ($repo, " . github_branch() . ") ==\n";
+    try {
+        github_get("https://api.github.com/repos/$repo/zipball/" . rawurlencode(github_branch()), $tmp);
+        $r = panel_apply_zip($tmp);
+    } finally {
+        @unlink($tmp);
+    }
+    if ($sha) {
+        setting_set('panel_sha', $sha);
+    }
+    return ['success' => true, 'log' => $log . "{$r['files']} Dateien aktualisiert, Backup: {$r['backup']}\n"];
+}
+
+// ---------------------------------------------------------------- Prüfen & Aktualisieren
+
+/** Neuester Commit des Branches auf GitHub; merkt sich das Ergebnis. */
+function panel_check_remote(): array
+{
+    $repo = github_repo();
+    if ($repo === '') {
+        throw new RuntimeException('GITHUB_REPO ist in der .env nicht gesetzt (Format: Besitzer/Repository).');
+    }
+    $c = json_decode(github_get("https://api.github.com/repos/$repo/commits/" . rawurlencode(github_branch())), true);
+    if (!is_array($c) || !preg_match('/^[0-9a-f]{40}$/', (string)($c['sha'] ?? ''))) {
+        throw new RuntimeException('Unerwartete Antwort von GitHub.');
+    }
+    $latest = [
+        'sha' => $c['sha'], 'short' => substr($c['sha'], 0, 7),
+        'message' => mb_substr(strtok((string)($c['commit']['message'] ?? ''), "\n") ?: '', 0, 200),
+        'date' => (string)($c['commit']['committer']['date'] ?? ''), 'url' => (string)($c['html_url'] ?? ''),
+    ];
+    setting_set('panel_latest', json_encode($latest, JSON_UNESCAPED_UNICODE));
+    setting_set('panel_checked_at', (string)time());
+    $cur = panel_current_sha();
+    return $latest + ['current' => $cur, 'available' => $cur !== $latest['sha']];
+}
+
+function panel_latest_known(): ?array
+{
+    $m = json_decode(setting_get('panel_latest', ''), true);
+    if (!is_array($m) || empty($m['sha'])) {
+        return null;
+    }
+    $cur = panel_current_sha();
+    return $m + ['current' => $cur, 'available' => $cur !== $m['sha']];
+}
+
+/** Führt das Update aus (Git oder ZIP) und danach die Migrationen. Rückgabe: success, log, mode. */
+function panel_update(): array
+{
+    set_time_limit(300);
+    if (github_repo() === '') {
+        return ['success' => false, 'mode' => '-', 'log' => "GITHUB_REPO ist in der .env nicht gesetzt.\n"];
+    }
+    try {
+        $latest = panel_check_remote();
+        $mode = panel_is_git() ? 'git' : 'zip';
+        $r = $mode === 'git' ? panel_update_git() : panel_update_zip($latest['sha']);
+    } catch (Throwable $e) {
+        return ['success' => false, 'mode' => '-', 'log' => 'Fehler: ' . $e->getMessage() . "\n"];
+    }
+    $r['mode'] = $mode;
+    if (!$r['success']) {
+        return $r;
+    }
+    if (function_exists('opcache_reset')) {
+        @opcache_reset();
+    }
+    try {
+        $ran = migrate();
+        $r['log'] .= "\n== Datenbank ==\n" . ($ran ? 'Migrationen ausgeführt: ' . implode(', ', $ran) : 'Keine neuen Migrationen.') . "\n";
+    } catch (Throwable $e) {
+        $r['success'] = false;
+        $r['log'] .= "\nDatei-Update ok, aber die Datenbank-Migration schlug fehl: " . $e->getMessage() . "\n";
+        return $r;
+    }
+    $now = panel_current_sha() ?? $latest['sha'];
+    setting_set('panel_last_update', date('d.m.Y H:i') . ' → ' . substr($now, 0, 7) . ' (' . $mode . ')');
+    setting_set('panel_latest', json_encode($latest, JSON_UNESCAPED_UNICODE));
+    $r['log'] .= "\nFertig – jetzt auf Stand " . substr($now, 0, 7) . ".\n";
+    return $r;
 }
 
 /**
- * Automatik: prüft höchstens alle 24 h (oder $force) und installiert im Modus „auto“.
- * Wird von cron_update.php und (mangels Cron) beim Öffnen des Admin-Dashboards aufgerufen.
+ * Fallback ohne Webhook: Einmal pro Tag prüfen (Dashboard eines Rolleninhabers bzw. Cron), im Modus „auto“ installieren.
  * Rückgabe: null oder ['type' => 'ok'|'err'|'info', 'msg' => string]
  */
 function panel_auto_tick(bool $force = false): ?array
 {
     $mode = setting_get('panel_update_mode', 'off');
-    if ($mode === 'off' || trim((string)cfg('panel_update_url')) === '') {
+    if ($mode === 'off' || github_repo() === '') {
         return null;
     }
     if (!$force && time() - (int)setting_get('panel_checked_at', '0') < 86400) {
         return null;
     }
     if (time() - (int)setting_get('panel_update_lock', '0') < 600) {
-        return null; // läuft gerade
+        return null;
     }
     setting_set('panel_update_lock', (string)time());
     try {
         $m = panel_check_remote();
         if (!$m['available']) {
-            return ['type' => 'info', 'msg' => 'Panel ist aktuell (' . panel_version() . ').'];
+            return ['type' => 'info', 'msg' => 'Panel ist aktuell (' . $m['short'] . ').'];
         }
         if ($mode === 'auto') {
-            return ['type' => 'ok', 'msg' => 'Automatisch: ' . panel_result_text(panel_install_remote($m))];
+            $r = panel_update();
+            return ['type' => $r['success'] ? 'ok' : 'err', 'msg' => $r['success'] ? 'Automatisch aktualisiert auf ' . $m['short'] . ' – ' . $m['message'] : 'Automatisches Update fehlgeschlagen: ' . trim(substr($r['log'], -300))];
         }
-        return ['type' => 'info', 'msg' => "Neue Panel-Version {$m['version']} verfügbar."];
+        return ['type' => 'info', 'msg' => 'Neue Version auf GitHub: ' . $m['short'] . ' – ' . $m['message']];
     } catch (Throwable $e) {
-        setting_set('panel_checked_at', (string)time()); // keine Endlosschleife bei Fehlern
+        setting_set('panel_checked_at', (string)time());
         error_log('Panel-Update: ' . $e->getMessage());
-        return ['type' => 'err', 'msg' => 'Automatisches Update fehlgeschlagen: ' . $e->getMessage()];
+        return ['type' => 'err', 'msg' => 'Update-Prüfung fehlgeschlagen: ' . $e->getMessage()];
     } finally {
         setting_set('panel_update_lock', '0');
     }
-}
-
-// ---------------------------------------------------------------- Client-Releases
-
-function client_release_path(string $version): string
-{
-    if (!valid_version($version)) {
-        throw new InvalidArgumentException('Ungültige Version.');
-    }
-    return storage_dir('releases') . '/client-' . $version . '.zip';
-}
-
-/** Aktive Releases, neueste zuerst. */
-function client_releases_active(): array
-{
-    $rows = q_all('SELECT * FROM client_releases WHERE active = 1');
-    usort($rows, fn($a, $b) => version_compare($b['version'], $a['version']));
-    return $rows;
 }

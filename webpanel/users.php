@@ -1,48 +1,25 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/lib/web.php';
-$me = require_login(true);
+$me = require_login('users.view', 'users.manage');
+$manage = can('users.manage');
 
 if (is_post()) {
-    $action = $_POST['action'] ?? '';
-    $id = (int)($_POST['id'] ?? 0);
-    $name = trim((string)($_POST['full_name'] ?? ''));
-    $hours = max(0, min(80, (float)str_replace(',', '.', (string)($_POST['weekly_hours'] ?? '40'))));
-    $role = ($_POST['role'] ?? '') === 'admin' ? 'admin' : 'employee';
-    $pass = (string)($_POST['password'] ?? '');
-
     try {
-        if ($action === 'create') {
-            $uname = trim((string)($_POST['username'] ?? ''));
-            if ($uname === '' || $name === '' || strlen($pass) < 8) {
-                throw new DomainException('Benutzername, Name und Passwort (min. 8 Zeichen) sind Pflicht.');
-            }
-            q('INSERT INTO users (username, password_hash, full_name, role, weekly_hours) VALUES (?,?,?,?,?)',
-                [$uname, password_hash($pass, PASSWORD_DEFAULT), $name, $role, $hours]);
-            flash('Mitarbeiter angelegt.');
-        } elseif ($action === 'update') {
-            if ($name === '') {
-                throw new DomainException('Name fehlt.');
-            }
-            $active = isset($_POST['active']) ? 1 : 0;
-            if ($id === (int)$me['id'] && (!$active || $role !== 'admin')) {
-                throw new DomainException('Du kannst dich nicht selbst deaktivieren oder herabstufen.');
-            }
-            q('UPDATE users SET full_name=?, role=?, weekly_hours=?, active=? WHERE id=?', [$name, $role, $hours, $active, $id]);
-            if ($pass !== '') {
-                if (strlen($pass) < 8) {
-                    throw new DomainException('Passwort min. 8 Zeichen.');
-                }
-                q('UPDATE users SET password_hash=? WHERE id=?', [password_hash($pass, PASSWORD_DEFAULT), $id]);
-                q('DELETE FROM api_tokens WHERE user_id = ?', [$id]);
-            }
-            if (!$active) {
-                q('DELETE FROM api_tokens WHERE user_id = ?', [$id]);
-            }
-            flash('Gespeichert.');
+        switch ($_POST['action'] ?? '') {
+            case 'save':
+                $in = $_POST;
+                $in['day_hours'] = (array)($_POST['day_hours'] ?? []);
+                $in['active'] = isset($_POST['id']) && (int)$_POST['id'] > 0 ? isset($_POST['active']) : 1;
+                user_save($me, $in);
+                flash('Gespeichert.');
+                break;
+            case 'overtime':
+                $min = (int)round((float)str_replace(',', '.', (string)($_POST['hours'] ?? '0')) * 60);
+                overtime_adjust($me, (int)$_POST['user_id'], (string)($_POST['date'] ?? ''), $min, (string)($_POST['note'] ?? ''));
+                flash('Überstunden gebucht.');
+                break;
         }
-    } catch (PDOException $ex) {
-        flash($ex->getCode() === '23000' ? 'Benutzername existiert bereits.' : 'Datenbankfehler.', 'err');
     } catch (DomainException $ex) {
         flash($ex->getMessage(), 'err');
     }
@@ -50,36 +27,74 @@ if (is_post()) {
 }
 
 $edit = isset($_GET['edit']) ? q_one('SELECT * FROM users WHERE id = ?', [(int)$_GET['edit']]) : null;
+$roles = q_all('SELECT id, name FROM roles ORDER BY is_system DESC, name');
 $users = q_all('SELECT * FROM users ORDER BY active DESC, full_name');
+$num = fn(float $v): string => rtrim(rtrim(number_format($v, 1, ',', ''), '0'), ',');
+
 page_header('Mitarbeiter', 'users');
 ?>
-<div class="card" style="max-width:640px">
-    <h2><?= $edit ? 'Bearbeiten: ' . e($edit['username']) : 'Neuer Mitarbeiter' ?></h2>
+<?php if ($manage): ?>
+<div class="card" style="max-width:760px">
+    <h2 style="margin-top:0"><?= $edit ? 'Bearbeiten: ' . e($edit['full_name']) : 'Neuer Mitarbeiter' ?></h2>
     <form method="post" class="stack">
-        <?= csrf_field() ?>
-        <input type="hidden" name="action" value="<?= $edit ? 'update' : 'create' ?>">
-        <input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
-        <?php if (!$edit): ?><label>Benutzername<input name="username" required></label><?php endif; ?>
-        <label>Name<input name="full_name" required value="<?= e($edit['full_name'] ?? '') ?>"></label>
-        <label>Wochenstunden<input name="weekly_hours" value="<?= e($edit['weekly_hours'] ?? '40') ?>"></label>
-        <label>Rolle<select name="role">
-            <option value="employee">Mitarbeiter</option>
-            <option value="admin" <?= ($edit['role'] ?? '') === 'admin' ? 'selected' : '' ?>>Administrator</option></select></label>
-        <label><?= $edit ? 'Neues Passwort (leer = unverändert)' : 'Passwort (min. 8 Zeichen)' ?><input type="password" name="password" <?= $edit ? '' : 'required' ?>></label>
-        <?php if ($edit): ?><label class="check"><input type="checkbox" name="active" <?= $edit['active'] ? 'checked' : '' ?>> Aktiv</label><?php endif; ?>
-        <div class="row"><button><?= $edit ? 'Speichern' : 'Anlegen' ?></button><?php if ($edit): ?><a class="btn" href="users.php">Abbrechen</a><?php endif; ?></div>
+        <?= csrf_field() ?><input type="hidden" name="action" value="save"><input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
+        <div class="row" style="justify-content:flex-start">
+            <label>Personalnummer<input name="personnel_number" value="<?= e($edit['personnel_number'] ?? '') ?>" placeholder="<?= $edit ? '' : 'automatisch ' . e(next_personnel_number()) ?>" style="width:150px"></label>
+            <label>Name<input name="full_name" required value="<?= e($edit['full_name'] ?? '') ?>" style="width:260px"></label>
+            <label>Rolle<select name="role_id"><?php foreach ($roles as $r): ?>
+                <option value="<?= (int)$r['id'] ?>" <?= (int)($edit['role_id'] ?? 0) === (int)$r['id'] || (!$edit && $r['name'] === 'Mitarbeiter') ? 'selected' : '' ?>><?= e($r['name']) ?></option><?php endforeach; ?></select></label>
+        </div>
+        <fieldset class="fs"><legend>Arbeitszeitmodell – Soll-Stunden je Wochentag</legend>
+            <div class="row" style="justify-content:flex-start">
+                <?php $dh = $edit ? user_day_hours($edit) : [1 => 8, 2 => 8, 3 => 8, 4 => 8, 5 => 8]; foreach (WEEKDAY_SHORT as $n => $l): ?>
+                    <label><?= $l ?><input name="day_hours[<?= $n ?>]" value="<?= isset($dh[$n]) ? e(rtrim(rtrim(number_format($dh[$n], 2, '.', ''), '0'), '.')) : '' ?>" placeholder="frei" style="width:70px"></label>
+                <?php endforeach; ?>
+                <label>Eintrittsdatum<input type="date" name="start_date" value="<?= e($edit['start_date'] ?? '') ?>"></label>
+            </div>
+            <div class="muted">Pro Wochentag die Stunden eintragen, an denen der Mitarbeiter arbeitet (leer = frei). Die Wochenstunden ergeben sich automatisch. Danach richten sich Soll, Plus-/Minusstunden und Urlaubstage.</div>
+        </fieldset>
+        <fieldset class="fs"><legend>Urlaub</legend>
+            <div class="row" style="justify-content:flex-start">
+                <label>Urlaubstage pro Jahr (leer = automatisch <?= (float)cfg('vacation_weeks') ?> Wochen)<input name="vacation_days" value="<?= e($edit['vacation_days_override'] ?? '') ?>" style="width:150px"></label>
+                <label>Resturlaub-Übertrag (Tage)<input name="vacation_carryover" value="<?= e($edit['vacation_carryover'] ?? '0') ?>" style="width:130px"></label>
+                <label>… gilt für Jahr<input name="vacation_carryover_year" value="<?= e($edit['vacation_carryover_year'] ?? date('Y')) ?>" style="width:90px"></label>
+            </div>
+        </fieldset>
+        <label><?= $edit ? 'Neues Passwort (leer = unverändert; muss beim nächsten Login geändert werden)' : 'Start-Passwort (min. 8 Zeichen; muss beim ersten Login geändert werden)' ?>
+            <input type="password" name="password" <?= $edit ? '' : 'required' ?> autocomplete="new-password"></label>
+        <?php if ($edit): ?><label class="check"><input type="checkbox" name="active" <?= $edit['active'] ? 'checked' : '' ?>> Aktiv (kann sich anmelden)</label><?php endif; ?>
+        <div class="row" style="justify-content:flex-start"><button><?= $edit ? 'Speichern' : 'Anlegen' ?></button><?php if ($edit): ?><a class="btn ghost" href="users.php">Abbrechen</a><?php endif; ?></div>
     </form>
 </div>
+<?php endif; ?>
 
 <table>
-    <tr><th>Benutzer</th><th>Name</th><th>Rolle</th><th>Std./Woche</th><th>Status</th><th></th></tr>
-    <?php foreach ($users as $u): ?>
+    <tr><th>Nr.</th><th>Name</th><th>Rolle</th><th>Std./Woche</th><th>Arbeitstage (Stunden)</th><th>Urlaub (Rest/Anspruch)</th><th>Überstunden</th><th>Status</th><th></th></tr>
+    <?php foreach ($users as $u):
+        $ov = user_overview($u); $v = $ov['vacation']; ?>
         <tr class="<?= $u['active'] ? '' : 'weekend' ?>">
-            <td><?= e($u['username']) ?></td><td><?= e($u['full_name']) ?></td>
-            <td><?= $u['role'] === 'admin' ? 'Administrator' : 'Mitarbeiter' ?></td>
-            <td><?= e($u['weekly_hours']) ?></td><td><?= $u['active'] ? 'Aktiv' : 'Deaktiviert' ?></td>
-            <td><a href="users.php?edit=<?= (int)$u['id'] ?>">Bearbeiten</a></td>
+            <td><?= e($u['personnel_number']) ?></td><td><?= e($u['full_name']) ?></td><td><?= e($ov['role']) ?></td>
+            <td><?= e($u['weekly_hours']) ?></td>
+            <td><?= e(implode(' · ', array_map(fn($d, $h) => WEEKDAY_SHORT[$d] . ' ' . rtrim(rtrim(number_format($h, 2, ',', ''), '0'), ','), array_keys($ov['day_hours']), $ov['day_hours']))) ?></td>
+            <td><?= $num($v['remaining']) ?> / <?= $num($v['entitlement'] + $v['carryover']) ?></td>
+            <td class="<?= $ov['overtime_seconds'] < 0 ? 'neg' : '' ?>"><?= ($ov['overtime_seconds'] > 0 ? '+' : '') . fmt_hm($ov['overtime_seconds']) ?> h</td>
+            <td><?= $u['active'] ? 'Aktiv' : 'Deaktiviert' ?></td>
+            <td class="nowrap"><?php if ($manage): ?><a href="users.php?edit=<?= (int)$u['id'] ?>">Bearbeiten</a><?php endif; ?></td>
         </tr>
     <?php endforeach; ?>
 </table>
+
+<?php if (can('overtime.manage')): ?>
+<div class="card" style="max-width:760px">
+    <h2 style="margin-top:0">Überstunden buchen</h2>
+    <form method="post" class="row filter">
+        <?= csrf_field() ?><input type="hidden" name="action" value="overtime">
+        <label>Mitarbeiter <?= user_select('user_id', (int)($edit['id'] ?? 0)) ?></label>
+        <label>Datum <input type="date" name="date" value="<?= date('Y-m-d') ?>" required></label>
+        <label>Stunden (+ gutschreiben, − auszahlen) <input name="hours" placeholder="-8" required style="width:150px"></label>
+        <label>Notiz <input name="note" maxlength="255" placeholder="z. B. Auszahlung"></label>
+        <button>Buchen</button>
+    </form>
+</div>
+<?php endif; ?>
 <?php page_footer();

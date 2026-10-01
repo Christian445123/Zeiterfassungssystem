@@ -35,7 +35,8 @@ function cfg(string $key): ?string
         'db_host' => ['DB_HOST', 'localhost'], 'db_port' => ['DB_PORT', '3306'], 'db_name' => ['DB_NAME', 'zeiterfassung'],
         'db_user' => ['DB_USER', 'root'], 'db_pass' => ['DB_PASS', ''],
         'timezone' => ['TIMEZONE', 'Europe/Vienna'], 'app_name' => ['APP_NAME', 'Zeiterfassung'],
-        'token_lifetime_days' => ['TOKEN_LIFETIME_DAYS', '30'],
+        'token_lifetime_days' => ['TOKEN_LIFETIME_DAYS', '30'], 'github_branch' => ['GITHUB_BRANCH', 'main'],
+        'vacation_weeks' => ['VACATION_WEEKS', '5'], 'entry_edit_days' => ['ENTRY_EDIT_DAYS', '31'], 'holidays' => ['HOLIDAYS', 'AT'],
     ];
     [$envKey, $def] = $map[$key] ?? [strtoupper($key), null];
     return $GLOBALS['cfg'][$envKey] ?? $def;
@@ -99,37 +100,15 @@ function fmt_d(?string $d): string
     return $d ? date('d.m.Y', strtotime($d)) : '–';
 }
 
-function random_key(string $prefix, int $bytes = 24): string
-{
-    return $prefix . bin2hex(random_bytes($bytes));
-}
-
-function random_license_key(): string
-{
-    $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    $parts = [];
-    for ($i = 0; $i < 4; $i++) {
-        $p = '';
-        for ($j = 0; $j < 4; $j++) {
-            $p .= $alphabet[random_int(0, strlen($alphabet) - 1)];
-        }
-        $parts[] = $p;
-    }
-    return implode('-', $parts);
-}
-
-function license_is_valid(array $lic): bool
-{
-    if (!(int)$lic['active']) {
-        return false;
-    }
-    return $lic['expires_at'] === null || $lic['expires_at'] >= date('Y-m-d');
-}
-
 require __DIR__ . '/time.php';
+require __DIR__ . '/rbac.php';
+require __DIR__ . '/hr.php';
+require __DIR__ . '/admin.php';
+require __DIR__ . '/business.php';
 require __DIR__ . '/migrate.php';
 require __DIR__ . '/settings.php';
 require __DIR__ . '/updater.php';
+require __DIR__ . '/admin_sys.php';
 
 /**
  * Nie eine leere Seite: unbehandelte Fehler werden geloggt und mit Hinweis angezeigt.
