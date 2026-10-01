@@ -290,7 +290,7 @@ function overtime_balance(array $u, ?string $upTo = null): array
 
 // ------------------------------------------------------------ Urlaub
 
-/** Urlaubsanspruch im Jahr: manuell festgelegt, sonst VACATION_WEEKS (Standard 5) × Arbeitstage/Woche; im Eintrittsjahr anteilig. */
+/** Urlaubsanspruch im Jahr: manuell festgelegt, sonst VACATION_WEEKS (Standard 5) x Arbeitstage pro Woche - immer voll, nie anteilig gekürzt. */
 function vacation_entitlement(array $u, int $year): float
 {
     $start = user_start_date($u);
@@ -301,12 +301,8 @@ function vacation_entitlement(array $u, int $year): float
     if (isset($u['vacation_days_override']) && $u['vacation_days_override'] !== '') {
         return (float)$u['vacation_days_override'];
     }
-    $base = (float)cfg('vacation_weeks') * count(user_workdays($u));
-    if ($year === $sy) {
-        $months = 12 - ((int)substr($start, 5, 2) - 1);
-        $base = ceil($base * $months / 12 * 2) / 2;
-    }
-    return $base;
+    // Volle 5 Wochen (VACATION_WEEKS) = 5 x Arbeitstage pro Woche, auch im Eintrittsjahr (keine anteilige Kürzung)
+    return (float)cfg('vacation_weeks') * count(user_workdays($u));
 }
 
 /** Zählwert eines Abwesenheitstages (0–1): nur Arbeitstage, keine Feiertage; mit Stunden anteilig. */
