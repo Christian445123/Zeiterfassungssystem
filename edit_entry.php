@@ -12,8 +12,12 @@ if ($id && (!$entry || !entry_editable($me, $entry))) {
 
 if (is_post()) {
     try {
-        entry_save($me, $_POST + ['source' => 'web']);
-        flash('Gespeichert.');
+        if (!$id) {
+            flash(manual_entry($me, $_POST)); // Arbeitszeit oder Arzt/Krank/Urlaub/…
+        } else {
+            entry_save($me, $_POST + ['source' => 'web']);
+            flash('Gespeichert.');
+        }
         redirect('entries.php');
     } catch (DomainException $ex) {
         flash($ex->getMessage(), 'err');
@@ -35,13 +39,32 @@ page_header($entry ? 'Eintrag bearbeiten' : 'Stunden eintragen', 'entries');
     <?php elseif ($allEdit): ?>
         <label>Mitarbeiter <?= user_select('user_id', (int)$v('user_id', $me['id'])) ?></label>
     <?php endif; ?>
-    <label>Datum <input type="date" name="date" value="<?= e($dateVal) ?>" required></label>
+    <?php if (!$entry && (can('absences.request') || can('absences.manage'))): ?>
+        <label>Art <select name="kind" id="kind"><option value="work" <?= ($_POST['kind'] ?? 'work') === 'work' ? 'selected' : '' ?>>Arbeitszeit</option>
+            <?php foreach (['doctor', 'sick', 'vacation', 'comp', 'other'] as $k): ?><option value="<?= $k ?>" <?= ($_POST['kind'] ?? '') === $k ? 'selected' : '' ?>><?= e(ABSENCE_TYPES[$k]) ?></option><?php endforeach; ?></select></label>
+    <?php endif; ?>
+    <label>Datum <input type="date" name="date" value="<?= e($dateVal) ?>" data-max="<?= date('Y-m-d') ?>" required></label>
     <div class="row" style="justify-content:flex-start">
-        <label>Von <input type="time" name="start" value="<?= e($startVal) ?>" required></label>
-        <label>Bis <input type="time" name="end" value="<?= e($endVal) ?>" required></label>
+        <label>Von <input type="time" name="start" value="<?= e($startVal) ?>" data-wt required></label>
+        <label>Bis <input type="time" name="end" value="<?= e($endVal) ?>" data-wt required></label>
         <label>Pause (Min) <input type="number" min="0" name="break_min" value="<?= (int)$v('break_min', $entry['manual_break_min'] ?? 0) ?>" style="width:100px"></label>
     </div>    <label>Notiz <input name="note" maxlength="500" value="<?= e($v('note', $entry['note'] ?? '')) ?>"></label>
     <div class="muted">Ende vor Beginn = Nachtschicht über Mitternacht. Überschneidungen mit anderen Einträgen sind nicht möglich.</div>
+    <div class="muted" id="kindHint" style="display:none">Arzt, Krankenstand &amp; Co.: <b>ohne Von/Bis = ganzer Tag</b>, mit Von/Bis nur diese Stunden (z. B. Arzt 10:00–11:30). Auch für kommende Tage möglich.</div>
     <div class="row" style="justify-content:flex-start"><button>Speichern</button><a class="btn ghost" href="entries.php">Abbrechen</a></div>
 </form>
+<script>
+(function () {
+    var k = document.getElementById('kind');
+    if (!k) return;
+    function sync() {
+        var work = k.value === 'work';
+        document.querySelectorAll('[data-wt]').forEach(function (i) { i.required = work; });
+        var d = document.querySelector('input[name=date]');
+        if (d && d.dataset.max) { if (work) d.max = d.dataset.max; else d.removeAttribute('max'); }
+        var h = document.getElementById('kindHint'); if (h) h.style.display = work ? 'none' : '';
+    }
+    k.addEventListener('change', sync); sync();
+})();
+</script>
 <?php page_footer();

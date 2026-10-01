@@ -4,7 +4,7 @@ Webanwendung (PHP 8.1+, MySQL/MariaDB) für einen Betrieb mit mehreren Mitarbeit
 
 ## Was kann sie?
 
-- **Stunden manuell eintragen** (kein Ein-/Ausstempeln): Datum, Von, Bis, Pause, Notiz. Überschneidungen und Zukunft werden abgelehnt; an geschlossenen Tagen und Feiertagen kann man trotzdem jederzeit Zeiten eintragen.
+- **Stunden manuell eintragen** (kein Ein-/Ausstempeln): Art, Datum, Von, Bis, Pause, Notiz. Die **Art** ist „Arbeitszeit“ oder Arzt, Krankenstand, Urlaub, Zeitausgleich, Sonstiges (ohne Von/Bis = ganzer Tag, mit Von/Bis nur diese Stunden, z. B. Arzt 10:00–11:30). Überschneidungen und Zukunft werden abgelehnt; an geschlossenen Tagen und Feiertagen kann man trotzdem jederzeit Zeiten eintragen.
 - **Arbeitszeitmodell je Mitarbeiter:** Stunden pro Wochentag (z. B. Mo 8 h, Di 6 h, Do 4 h) → daraus ergeben sich Soll, Wochenstunden und Urlaubstage.
 - **Plus-/Minusstunden:** Jeder Mitarbeiter sieht sein Stundenkonto (Ist − Soll seit Eintritt, plus Buchungen wie Auszahlungen). Zeitausgleich mindert es automatisch.
 - **Urlaub:** 5 Wochen pro Jahr automatisch (= 5 × Arbeitstage pro Woche, immer in voller Höhe), pro Mitarbeiter überschreibbar, mit Resturlaub-Übertrag. Beantragen/Genehmigen, Krankenstand, Arzt (ganz- oder teiltägig), Zeitausgleich. **Urlaubsplaner** als Monatskalender.

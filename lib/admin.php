@@ -445,3 +445,43 @@ function roles_overview(): array
     }
     return $out;
 }
+
+// ------------------------------------------------------------ Manuelle Eintragung: Arbeitszeit oder Arzt/Krank/Urlaub/…
+
+/**
+ * Eine Eintragung von Hand: kind = work (Arbeitszeit) oder eine Abwesenheitsart (doctor, sick, vacation, comp, other).
+ * Bei Abwesenheiten ohne Von/Bis gilt der ganze Tag, mit Von/Bis nur diese Stunden (z. B. Arzt 10:00–11:30).
+ * Rückgabe: Meldung für den Benutzer.
+ */
+function manual_entry(array $actor, array $in): string
+{
+    $kind = (string)($in['kind'] ?? 'work');
+    if ($kind === 'work') {
+        entry_save($actor, $in + ['id' => 0, 'source' => 'web']);
+        return 'Stunden eingetragen.';
+    }
+    if (!isset(ABSENCE_TYPES[$kind])) {
+        throw new DomainException('Ungültige Art.');
+    }
+    $date = (string)($in['date'] ?? '');
+    $st = (string)($in['start'] ?? '');
+    $en = (string)($in['end'] ?? '');
+    $hours = null;
+    if ($st !== '' || $en !== '') {
+        if (!valid_hhmm($st) || !valid_hhmm($en) || !valid_date($date)) {
+            throw new DomainException('Bitte Von und Bis im Format HH:MM angeben – oder beides leer lassen (= ganzer Tag).');
+        }
+        $min = (int)((strtotime("$date $en") - strtotime("$date $st")) / 60);
+        $min = ($min <= 0 ? $min + 1440 : $min) - max(0, (int)($in['break_min'] ?? 0));
+        if ($min <= 0) {
+            throw new DomainException('Die angegebene Zeit ist leer – bitte Von/Bis prüfen.');
+        }
+        $hours = round($min / 60, 2);
+    }
+    absence_create($actor, [
+        'type' => $kind, 'date_from' => $date, 'date_to' => $date, 'hours' => $hours,
+        'note' => $in['note'] ?? '', 'user_id' => $in['user_id'] ?? 0,
+    ]);
+    $label = ABSENCE_TYPES[$kind] . ($hours !== null ? ' (' . rtrim(rtrim(number_format($hours, 2, ',', ''), '0'), ',') . ' h)' : ' (ganzer Tag)');
+    return user_can($actor, 'absences.manage') ? "$label eingetragen." : "$label eingetragen – wartet auf Genehmigung.";
+}
