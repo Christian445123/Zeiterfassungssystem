@@ -55,3 +55,12 @@ Unter **Updates** (Recht *Updates verwalten*): *Auf Updates prüfen* und *Jetzt 
 
 - Urlaubstage und Soll berücksichtigen nur Arbeitstage laut Arbeitszeitmodell; geschlossene Tage (Feiertage, Schließtage) verbrauchen weder Soll noch Urlaub.
 - Das Stundenkonto zählt ab dem Eintrittsdatum (Standard: Datum der Anlage) – fehlende Eintragungen erscheinen als Minusstunden.
+
+## Mobile Apps (iOS & Android) und API
+
+Die Apps im Repository `Zeiterfassung-App` sprechen über die REST-API mit dieser Website: `api/index.php?route=…` (JSON).
+
+- **Anmeldung:** `POST auth/login` mit Personalnummer + Passwort liefert einen Token (gespeichert als SHA-256-Hash, Laufzeit `TOKEN_LIFETIME_DAYS`). Danach bei jeder Anfrage Header `X-Auth-Token` (oder `Authorization: Bearer`). Nach 10 Fehlversuchen in 15 Minuten wird die Anmeldung gesperrt.
+- **Rechte:** Jede Route prüft dieselben Rechte wie das Webpanel; die App blendet nur Bereiche ein, die die Rolle erlaubt.
+- **Routen:** `me`, `entries` (+ `/save`, `/manual`, `/delete`), `report`, `months` (+ `/close`, `/reopen`, `/close_all`), `absences`, `calendar`, `schedule` (+ `shifts/save|delete|copy_week`), `users`, `overtime/adjust`, `roles`, `business`, `updates`, `info` (öffentlicher Verbindungstest).
+- **HTTPS ist Pflicht** für den produktiven Einsatz (Token und Passwörter).

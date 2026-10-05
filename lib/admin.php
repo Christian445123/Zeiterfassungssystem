@@ -88,7 +88,7 @@ function entry_save(array $actor, array $in): int
         q('UPDATE time_entries SET start_time=?, end_time=?, manual_break_min=?, note=? WHERE id=?', [$s, $e, $brk, $note, $id]);
         return $id;
     }
-    $source = $uid !== (int)$actor['id'] ? 'manual' : 'web';
+    $source = $uid !== (int)$actor['id'] ? 'manual' : (($in['source'] ?? '') === 'app' ? 'client' : 'web'); // client = mobile App
     q('INSERT INTO time_entries (user_id, start_time, end_time, manual_break_min, note, source) VALUES (?,?,?,?,?,?)',
         [$uid, $s, $e, $brk, $note, $source]);
     return (int)db()->lastInsertId();

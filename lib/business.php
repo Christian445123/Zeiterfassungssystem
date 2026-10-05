@@ -130,3 +130,28 @@ function months_overview(string $month, array $viewer): array
     }
     return $rows;
 }
+
+/** Betriebsübersicht für ein Jahr: Öffnungszeiten, Feiertage mit Status, eigene Sondertage (Webpanel-Seite „Betrieb“ und API). */
+function business_overview(int $year): array
+{
+    $specials = special_days_map();
+    $hol = holidays_for_year($year);
+    ksort($hol);
+    $holidays = [];
+    foreach ($hol as $date => $name) {
+        $sp = $specials[$date] ?? null;
+        $open = $sp && $sp['kind'] === 'open';
+        $holidays[] = ['date' => $date, 'name' => $name, 'weekday' => WEEKDAY_SHORT[(int)date('N', strtotime($date))], 'open' => $open,
+            'open_from' => $open && $sp['open_from'] ? substr($sp['open_from'], 0, 5) : null, 'open_to' => $open && $sp['open_to'] ? substr($sp['open_to'], 0, 5) : null];
+    }
+    ksort($specials);
+    return [
+        'year' => $year,
+        'opening_hours' => opening_hours(),
+        'holidays' => $holidays,
+        'special_days' => array_values(array_map(fn($d, $s) => ['date' => $d, 'kind' => $s['kind'], 'name' => $s['name'],
+            'weekday' => WEEKDAY_SHORT[(int)date('N', strtotime($d))],
+            'open_from' => $s['open_from'] ? substr($s['open_from'], 0, 5) : null, 'open_to' => $s['open_to'] ? substr($s['open_to'], 0, 5) : null],
+            array_keys($specials), $specials)),
+    ];
+}
