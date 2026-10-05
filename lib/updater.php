@@ -194,8 +194,22 @@ function panel_update_git(): array
     if (($tok = trim((string)cfg('github_token'))) !== '') {
         $auth = ' -c ' . escapeshellarg('http.https://github.com/.extraheader=AUTHORIZATION: basic ' . base64_encode('x-access-token:' . $tok));
     }
-    [$code, $out, $err] = run_shell_command(git_cmd(ltrim($auth) . ' pull --ff-only ' . escapeshellarg($url) . ' ' . escapeshellarg(github_branch())), PANEL_ROOT);
+    $pull = fn() => run_shell_command(git_cmd(ltrim($auth) . ' pull --ff-only ' . escapeshellarg($url) . ' ' . escapeshellarg(github_branch())), PANEL_ROOT);
+    [$code, $out, $err] = $pull();
     $log .= $out . $err;
+    // Nicht versionierte Dateien (z. B. von Hand/per ZIP hochgeladen), die das Update überschreiben würde: sichern und erneut versuchen
+    if ($code !== 0 && stripos($err, 'untracked working tree files would be overwritten') !== false) {
+        $moved = panel_stash_untracked($err);
+        if ($moved) {
+            $log .= "
+Vorhandene, nicht versionierte Dateien wurden gesichert (storage/backups/untracked-*): " . implode(', ', $moved) . "
+
+== git pull --ff-only (erneut) ==
+";
+            [$code, $out, $err] = $pull();
+            $log .= $out . $err;
+        }
+    }
     if ($code !== 0) {
         $hint = (stripos($err, 'permission') !== false || stripos($err, 'unable to create') !== false)
             ? "\nBerechtigungsproblem: Der Webserver-Benutzer darf im Ordner .git nicht schreiben. Einmalig per SSH: chown -R <webuser>: " . escapeshellarg((string)realpath(PANEL_ROOT)) . "\n"
@@ -203,6 +217,30 @@ function panel_update_git(): array
         return ['success' => false, 'log' => $log . "\ngit pull fehlgeschlagen (Exit-Code $code).$hint"];
     }
     return ['success' => true, 'log' => $log];
+}
+
+/** Verschiebt die in einer Git-Fehlermeldung genannten, nicht versionierten Dateien in ein Sicherungsverzeichnis. Rückgabe: verschobene Pfade. */
+function panel_stash_untracked(string $gitError): array
+{
+    $dir = storage_dir('backups') . '/untracked-' . date('Ymd-His');
+    $moved = [];
+    foreach (explode("\n", $gitError) as $line) {
+        if (!preg_match('/^\t(\S.*?)\s*$/', $line, $m)) {
+            continue;
+        }
+        $rel = safe_rel_path($m[1]);
+        if ($rel === null || panel_is_protected($rel) || !is_file(PANEL_ROOT . '/' . $rel)) {
+            continue;
+        }
+        $to = $dir . '/' . $rel;
+        if (!is_dir(dirname($to))) {
+            @mkdir(dirname($to), 0775, true);
+        }
+        if (@rename(PANEL_ROOT . '/' . $rel, $to)) {
+            $moved[] = $rel;
+        }
+    }
+    return $moved;
 }
 
 // ---------------------------------------------------------------- ZIP-Weg (ohne Git)
