@@ -62,5 +62,6 @@ Die Apps im Repository `Zeiterfassung-App` sprechen über die REST-API mit diese
 
 - **Anmeldung:** `POST auth/login` mit Personalnummer + Passwort liefert einen Token (gespeichert als SHA-256-Hash, Laufzeit `TOKEN_LIFETIME_DAYS`). Danach bei jeder Anfrage Header `X-Auth-Token` (oder `Authorization: Bearer`). Nach 10 Fehlversuchen in 15 Minuten wird die Anmeldung gesperrt.
 - **Rechte:** Jede Route prüft dieselben Rechte wie das Webpanel; die App blendet nur Bereiche ein, die die Rolle erlaubt.
+- **App-Updates:** Trage in der `.env` `APP_LATEST_VERSION` (z. B. `1.1.0`) und `APP_ANDROID_URL` (APK-Download) bzw. `APP_IOS_URL` (TestFlight/App Store) ein – die App zeigt dann "Update verfügbar". `APP_MIN_VERSION` erzwingt ein Update älterer Versionen.
 - **Routen:** `me`, `entries` (+ `/save`, `/manual`, `/delete`), `report`, `months` (+ `/close`, `/reopen`, `/close_all`), `absences`, `calendar`, `schedule` (+ `shifts/save|delete|copy_week`), `users`, `overtime/adjust`, `roles`, `business`, `updates`, `info` (öffentlicher Verbindungstest).
 - **HTTPS ist Pflicht** für den produktiven Einsatz (Token und Passwörter).
