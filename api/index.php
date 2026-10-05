@@ -43,9 +43,7 @@ try {
     // ---- öffentlich: Verbindungstest (Server-Adresse prüfen) ----
     if ($route === 'info' && $method === 'GET') {
         api_ok(['app' => cfg('app_name'), 'version' => panel_version(), 'api' => 1, 'timezone' => cfg('timezone'),
-            // Hinweis auf neue App-Versionen (in der .env pflegen; leer = kein Hinweis)
-            'app_update' => ['latest' => trim((string)cfg('app_latest_version')), 'min' => trim((string)cfg('app_min_version')),
-                'android_url' => trim((string)cfg('app_android_url')), 'ios_url' => trim((string)cfg('app_ios_url'))]]);
+            'app_update' => app_update_info()]);
     }
 
     ensure_migrated();

@@ -485,3 +485,52 @@ function panel_auto_tick(bool $force = false): ?array
         setting_set('panel_update_lock', '0');
     }
 }
+
+// ---------------------------------------------------------------- Mobile App: neueste Version automatisch von GitHub
+
+/**
+ * Neueste App-Version für die Mobile App (API-Route "info"). Quelle: das neueste GitHub-Release des App-Repositories
+ * (APP_GITHUB_REPO, Tag v1.2.0 → Version 1.2.0, Android-Link = die .apk des Releases). Eintragungen in der .env
+ * (APP_LATEST_VERSION, APP_ANDROID_URL, APP_IOS_URL, APP_MIN_VERSION) haben Vorrang. Das Ergebnis wird 1 Stunde gemerkt.
+ */
+function app_update_info(): array
+{
+    $out = ['latest' => '', 'min' => '', 'android_url' => '', 'ios_url' => ''];
+    $repo = trim((string)cfg('app_github_repo'));
+    if (preg_match('#^[\w.\-]+/[\w.\-]+$#', $repo)) {
+        try {
+            $c = json_decode(setting_get('app_release_cache', ''), true);
+            $stale = !is_array($c) || ($c['repo'] ?? '') !== $repo || (int)($c['at'] ?? 0) < time() - ((int)($c['ok'] ?? 0) ? 3600 : 600);
+            if ($stale) {
+                $c = ['repo' => $repo, 'at' => time(), 'ok' => 0, 'version' => $c['version'] ?? '', 'apk' => $c['apk'] ?? ''];
+                try {
+                    $r = json_decode(github_get("https://api.github.com/repos/$repo/releases/latest"), true);
+                    if (is_array($r) && !empty($r['tag_name'])) {
+                        $apk = '';
+                        foreach ((array)($r['assets'] ?? []) as $a) {
+                            if (str_ends_with(strtolower((string)($a['name'] ?? '')), '.apk')) {
+                                $apk = (string)$a['browser_download_url'];
+                                break;
+                            }
+                        }
+                        $c = ['repo' => $repo, 'at' => time(), 'ok' => 1, 'version' => ltrim((string)$r['tag_name'], 'vV'), 'apk' => $apk];
+                    }
+                } catch (Throwable $e) {
+                    // GitHub nicht erreichbar: alter Stand bleibt, später erneut versuchen
+                }
+                setting_set('app_release_cache', json_encode($c));
+            }
+            $out['latest'] = (string)($c['version'] ?? '');
+            $out['android_url'] = (string)($c['apk'] ?? '');
+        } catch (Throwable $e) {
+            // Einstellungen nicht lesbar: ohne Hinweis weitermachen
+        }
+    }
+    foreach (['latest' => 'app_latest_version', 'min' => 'app_min_version', 'android_url' => 'app_android_url', 'ios_url' => 'app_ios_url'] as $k => $key) {
+        $v = trim((string)cfg($key));
+        if ($v !== '') {
+            $out[$k] = $v;
+        }
+    }
+    return $out;
+}
